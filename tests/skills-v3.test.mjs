@@ -104,4 +104,9 @@ test('set, set-lane and guard install preserve models and never downgrade the ve
   c = readSkillsConfig(repo);
   assert.equal(c.version, 3);
   assert.deepEqual(c.models, V3().models);
+  assert.equal(cli(repo, ['guard', 'uninstall']).status, 0);
+  c = readSkillsConfig(repo);
+  assert.equal(c.version, 3);
+  assert.deepEqual(c.models, V3().models);
+  assert.equal(c.guard, 'declined');
 });

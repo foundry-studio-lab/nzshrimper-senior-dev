@@ -466,8 +466,8 @@ switch (cmd) {
         try { unlinkSync(join(bundleDir, f)); } catch {}
       }
       const cfg = readSkillsConfig(repoRoot) || { version: 2, source: 'superpowers', shared: false };
-      cfg.version = 2;
       cfg.guard = 'declined';
+      stampVersion(cfg);
       writeSkillsConfig(repoRoot, cfg);
       console.log('guard uninstalled: shims removed, any preserved hooks restored');
       break;
