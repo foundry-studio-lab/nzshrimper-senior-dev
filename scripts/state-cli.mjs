@@ -235,6 +235,43 @@ switch (cmd) {
   }
   case 'review': {
     const state = requireSession(repoRoot);
+    if (flags.overrule !== undefined || flags.uphold !== undefined) {
+      if (flags.overrule !== undefined && flags.uphold !== undefined) fail('review takes --overrule or --uphold, not both');
+      if (flags.overrule !== undefined && flags.overrule !== true) fail('review --overrule does not take a value');
+      if (flags.uphold !== undefined && flags.uphold !== true) fail('review --uphold does not take a value');
+      const decision = flags.overrule === true ? 'overruled' : 'upheld';
+      const flagName = decision === 'overruled' ? '--overrule' : '--uphold';
+      requireValues('review', flags, ['phase', 'reviewer', 'cycle', 'reason', 'by']);
+      if (!flags.phase) fail('review needs --phase <name>');
+      if (!['codex', 'claude'].includes(flags.reviewer)) fail('review needs --reviewer codex|claude');
+      if (!/^[0-9]+$/.test(String(flags.cycle ?? ''))) fail('review needs --cycle <n>');
+      const cycle = parseInt(flags.cycle, 10);
+      if (typeof flags.reason !== 'string' || !flags.reason.trim()) fail(`review ${flagName} needs --reason "<text>"`);
+      const latestOf = (reviewer) => (state.reviews || [])
+        .filter((r) => r.phase === flags.phase && r.reviewer === reviewer)
+        .reduce((a, b) => (!a || (b.cycle ?? 1) >= (a.cycle ?? 1) ? b : a), null);
+      const mine = latestOf(flags.reviewer);
+      if (!mine || (mine.cycle ?? 1) !== cycle || mine.verdict !== 'NEEDS_REVISION') {
+        fail(`no NEEDS_REVISION from ${flags.reviewer} at cycle ${cycle} is the latest verdict for '${flags.phase}'`);
+      }
+      if (decision === 'overruled') {
+        const other = flags.reviewer === 'codex' ? 'claude' : 'codex';
+        const theirs = latestOf(other);
+        if (!theirs || theirs.verdict !== 'APPROVED') fail(`nothing to adjudicate: ${other}'s latest verdict for '${flags.phase}' is not APPROVED`);
+      }
+      const by = typeof flags.by === 'string'
+        ? flags.by
+        : (resolveModel(readSkillsConfig(repoRoot), state.type, 'adjudicate').claude || 'fable');
+      if (!CLAUDE_TIERS.includes(by)) fail(`--by must be one of: ${CLAUDE_TIERS.join(', ')}`);
+      state.adjudications = state.adjudications || [];
+      state.adjudications.push({
+        phase: flags.phase, cycle, reviewer: flags.reviewer, decision, by,
+        reason: flags.reason.trim(), at: new Date().toISOString(),
+      });
+      writeState(repoRoot, state);
+      console.log(`adjudication recorded: ${flags.phase} cycle ${cycle} ${flags.reviewer} ${decision} (by ${by})`);
+      break;
+    }
     requireValues('review', flags, ['phase', 'reviewer', 'verdict', 'cycle']);
     if (!flags.phase) fail('review needs --phase <name>');
     if (!['codex', 'claude'].includes(flags.reviewer)) fail('review needs --reviewer codex|claude');
@@ -416,6 +453,11 @@ switch (cmd) {
     if (state.degradations.length) console.log(`degradations: ${state.degradations.map((d) => `${d.wanted} -> ${d.used}`).join('; ')}`);
     const modelsUsed = modelsUsedLine(state);
     if (modelsUsed) console.log(modelsUsed);
+    const adj = state.adjudications || [];
+    if (adj.length) {
+      const n = adj.filter((a) => a.decision === 'overruled').length;
+      console.log(`adjudications: ${n} overruled, ${adj.length - n} upheld`);
+    }
     if (state.bypasses.length) console.log(`bypasses used: ${state.bypasses.map((b) => `${b.action}: ${b.reason}`).join('; ')}`);
     if (state.bypassArmed) console.log(`bypass ARMED: ${state.bypassArmed.reason}`);
     if ((state.waits || []).length) console.log(`past waits: ${state.waits.length}`);
