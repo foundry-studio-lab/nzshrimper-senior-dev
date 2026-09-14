@@ -206,3 +206,38 @@ test('core.hooksPath with a tilde resolves to the git-expanded dir, never a lite
   assert.equal(hookResult.status, 1);
   assert.ok((hookResult.stdout + hookResult.stderr).includes('senior-dev gate: integration blocked'));
 });
+
+test('guard pre-push blocks a split verdict even when the approval was recorded last', () => {
+  const repo = makeRepo();
+  cli(repo, ['guard', 'install']);
+  writeState(repo, blockedState({
+    phases: { implement: { status: 'done' }, review: { status: 'done' }, verify: { status: 'done' }, docs: { status: 'done' } },
+    reviews: [
+      { phase: 'implement', reviewer: 'codex', verdict: 'NEEDS_REVISION', cycle: 1 },
+      { phase: 'implement', reviewer: 'claude', verdict: 'APPROVED', cycle: 1 },
+    ],
+    docsGate: { handover: true, affectedDocs: true },
+    adjudications: [],
+  }));
+  const r = hook(repo, 'pre-push');
+  assert.notEqual(r.status, 0);
+  assert.ok(r.out.includes('NEEDS_REVISION'), r.out);
+});
+
+test('guard pre-push allows the push once the rejection is overruled', () => {
+  const repo = makeRepo();
+  cli(repo, ['guard', 'install']);
+  writeState(repo, blockedState({
+    phases: { implement: { status: 'done' }, review: { status: 'done' }, verify: { status: 'done' }, docs: { status: 'done' } },
+    reviews: [
+      { phase: 'implement', reviewer: 'claude', verdict: 'APPROVED', cycle: 1 },
+      { phase: 'implement', reviewer: 'codex', verdict: 'NEEDS_REVISION', cycle: 1 },
+    ],
+    docsGate: { handover: true, affectedDocs: true },
+    adjudications: [],
+  }));
+  assert.notEqual(hook(repo, 'pre-push').status, 0);
+  const o = cli(repo, ['review', '--phase', 'implement', '--reviewer', 'codex', '--cycle', '1', '--overrule', '--reason', 'adjudicator: concern is outside the diff']);
+  assert.equal(o.status, 0, o.out);
+  assert.equal(hook(repo, 'pre-push').status, 0);
+});
