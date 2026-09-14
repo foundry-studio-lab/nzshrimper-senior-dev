@@ -209,9 +209,26 @@ export function currentPhase(state) {
   return null;
 }
 
+// Per reviewer, per phase: each reviewer's latest-cycle verdict counts.
+// A phase is blocked while any reviewer's latest verdict is NEEDS_REVISION
+// that no operator-confirmed `overruled` adjudication matches. Return
+// shape {phase: verdict} is unchanged, so every caller stays as it is.
 export function latestVerdicts(state) {
+  const perPhase = {};
+  for (const r of state.reviews || []) {
+    const per = (perPhase[r.phase] = perPhase[r.phase] || {});
+    const cur = per[r.reviewer];
+    if (!cur || (r.cycle ?? 1) >= (cur.cycle ?? 1)) per[r.reviewer] = r;
+  }
+  const overruled = new Set((state.adjudications || [])
+    .filter((a) => a.decision === 'overruled')
+    .map((a) => `${a.phase}|${a.reviewer}|${a.cycle}`));
   const by = {};
-  for (const r of state.reviews || []) by[r.phase] = r.verdict;
+  for (const [phase, per] of Object.entries(perPhase)) {
+    const blocking = Object.values(per).some((r) =>
+      r.verdict !== 'APPROVED' && !overruled.has(`${phase}|${r.reviewer}|${r.cycle ?? 1}`));
+    by[phase] = blocking ? 'NEEDS_REVISION' : 'APPROVED';
+  }
   return by;
 }
 
