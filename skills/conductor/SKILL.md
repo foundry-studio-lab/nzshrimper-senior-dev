@@ -22,7 +22,9 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/state-cli.mjs" <subcommand> [flags]
 1. Run `node <plugin>/scripts/state-cli.mjs status` (the session bootstrap
    gives the exact path). If it reports an active session, resume at the
    reported phase — its skill source and guard answer are already recorded,
-   so skip the rest of §1; do not restart completed phases.
+   so skip the rest of §1; do not restart completed phases. If it prints a
+   `codex:` update line, offer `codex update` before the first Codex pass —
+   the review lanes use whatever CLI is on PATH.
 2. **Skill source (fresh run only, before classifying).** Decide which skills
    fill the process phases this run. Run `node <plugin>/scripts/state-cli.mjs
    skills-config show`.
