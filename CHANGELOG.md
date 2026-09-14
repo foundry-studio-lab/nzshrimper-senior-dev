@@ -7,7 +7,8 @@
   fix. Nothing in the plugin pins a Codex version or model: review lanes ride
   whatever `codex` is installed and whatever `~/.codex/config.toml` selects,
   so a stale CLI was invisible. Fails open (no codex, no network, or
-  `SENIOR_DEV_OFFLINE=1` => silent); 1.5s network cap.
+  `SENIOR_DEV_OFFLINE=1` => silent); 1.5s network cap. PRIVACY.md discloses
+  the lookup.
 
 ## 0.2.0 — 2026-07-08
 

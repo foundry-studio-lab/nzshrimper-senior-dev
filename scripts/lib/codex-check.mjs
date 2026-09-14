@@ -5,6 +5,9 @@
 import { execFileSync } from 'node:child_process';
 
 const SEMVER = /(\d+)\.(\d+)\.(\d+)/;
+// ponytail: npm is the oracle for 'latest'; the standalone installer (codex
+// update) has tracked the same version numbers so far. If the two channels
+// drift, switch to https://api.github.com/repos/openai/codex/releases/latest.
 const LATEST_URL = 'https://registry.npmjs.org/@openai/codex/latest';
 
 export function updateNotice(installed, latest) {

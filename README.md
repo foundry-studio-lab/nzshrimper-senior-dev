@@ -141,7 +141,7 @@ and `claude plugin update senior-dev@nzshrimper-senior-dev`, restart.</sub>
 | Command | Does |
 |---|---|
 | `/senior-dev:start [task]` | Start or resume an orchestrated session |
-| `/senior-dev:status` | Phase/gate/review/bypass report; warns when the Codex CLI is behind the latest release |
+| `/senior-dev:status` | Phase/gate/review/bypass report; warns when the Codex CLI is behind the latest release (one GET to the npm registry, see [Privacy](PRIVACY.md); `SENIOR_DEV_OFFLINE=1` disables it) |
 | `/senior-dev:bypass <reason>` | One-shot logged gate waiver |
 | `/senior-dev:skills [lane]` | Show and customise which skills fill each phase |
 | `/senior-dev:guard [install\|status\|uninstall]` | Manage the universal enforcement git hooks |
