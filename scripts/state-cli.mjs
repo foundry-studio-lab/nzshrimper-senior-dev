@@ -12,7 +12,7 @@ import {
   CHAINS, DOCS_GATE, findRepoRoot, readState, writeState, statePath,
   hasActiveSession, currentPhase, latestVerdicts, openGateItems, ensureExcluded,
   VALID_SOURCES, readSkillsConfig, writeSkillsConfig, resolveConfiguredSkill, normalizeLaneValue,
-  stampVersion, resolveModel, MODEL_PHASES, CLAUDE_TIERS, CODEX_EFFORTS,
+  stampVersion, resolveModel, MODEL_PHASES, CLAUDE_TIERS, CODEX_EFFORTS, TIER_RANK,
 } from './lib/state.mjs';
 import { codexUpdateNotice } from './lib/codex-check.mjs';
 
@@ -123,6 +123,16 @@ function parseSteps(raw) {
   return steps;
 }
 
+function modelsUsedLine(state) {
+  const d = state.dispatches || [];
+  if (!d.length) return null;
+  const counts = {};
+  for (const x of d) counts[x.claude] = (counts[x.claude] || 0) + 1;
+  const raised = d.filter((x) => x.reason).map((x) => `${x.phase} "${x.reason}"`);
+  const used = Object.entries(counts).map(([t, n]) => `${t}×${n}`).join(', ');
+  return `models used: ${used}${raised.length ? ` (raised: ${raised.join('; ')})` : ''}`;
+}
+
 function parseModelSteps(raw, allowedPhases) {
   // "implement=sonnet,review=sonnet/medium,finish=/high"
   //   -> { implement: {claude:'sonnet'}, review: {claude:'sonnet', codex:'medium'}, finish: {codex:'high'} }
@@ -192,6 +202,8 @@ switch (cmd) {
       bypasses: [],
       scratchFiles: [],
       waits: [],
+      dispatches: [],
+      adjudications: [],
       stopGate: { lastSnapshotHash: null },
     };
     writeState(repoRoot, state);
@@ -237,6 +249,43 @@ switch (cmd) {
     });
     writeState(repoRoot, state);
     console.log(`review recorded: ${flags.phase} cycle ${cycle} -> ${flags.verdict}`);
+    break;
+  }
+  case 'models': {
+    const state = requireSession(repoRoot);
+    requireValues('models', flags, ['phase']);
+    if (!flags.phase) fail('models needs --phase <phase>');
+    if (!MODEL_PHASES.includes(flags.phase)) fail(`models --phase must be one of: ${MODEL_PHASES.join(', ')}`);
+    const r = resolveModel(readSkillsConfig(repoRoot), state.type, flags.phase);
+    if (flags.json === true) console.log(JSON.stringify(r));
+    else console.log(`claude=${r.claude || 'none'} codex=${r.codex || 'none'}`);
+    break;
+  }
+  case 'dispatch': {
+    const state = requireSession(repoRoot);
+    requireValues('dispatch', flags, ['phase', 'claude', 'reason']);
+    if (!flags.phase) fail('dispatch needs --phase <phase>');
+    if (!MODEL_PHASES.includes(flags.phase)) fail(`dispatch --phase must be one of: ${MODEL_PHASES.join(', ')}`);
+    const r = resolveModel(readSkillsConfig(repoRoot), state.type, flags.phase);
+    const floor = r.claude;
+    if (!floor) fail(`phase '${flags.phase}' runs inline on the controller - no dispatch tier configured`);
+    let tier = floor;
+    let reason = null;
+    if (typeof flags.claude === 'string') {
+      if (!CLAUDE_TIERS.includes(flags.claude)) fail(`--claude must be one of: ${CLAUDE_TIERS.join(', ')}`);
+      if (TIER_RANK[flags.claude] < TIER_RANK[floor]) fail(`dispatch never lowers the configured floor (${floor})`);
+      if (TIER_RANK[flags.claude] > TIER_RANK[floor]) {
+        if (typeof flags.reason !== 'string' || !flags.reason.trim()) {
+          fail(`raising above the floor (${floor}) needs --reason "<SDD complexity signal>"`);
+        }
+        reason = flags.reason.trim();
+      }
+      tier = flags.claude;
+    }
+    state.dispatches = state.dispatches || [];
+    state.dispatches.push({ phase: flags.phase, claude: tier, floor, reason, at: new Date().toISOString() });
+    writeState(repoRoot, state);
+    console.log(`claude=${tier} codex=${r.codex || 'none'}${reason ? ` (raised from ${floor}: ${reason})` : ''}`);
     break;
   }
   case 'docs': {
@@ -365,6 +414,8 @@ switch (cmd) {
     if (Object.keys(verdicts).length) console.log(`reviews: ${JSON.stringify(verdicts)}`);
     console.log(`docs gate: ${JSON.stringify(state.docsGate)}`);
     if (state.degradations.length) console.log(`degradations: ${state.degradations.map((d) => `${d.wanted} -> ${d.used}`).join('; ')}`);
+    const modelsUsed = modelsUsedLine(state);
+    if (modelsUsed) console.log(modelsUsed);
     if (state.bypasses.length) console.log(`bypasses used: ${state.bypasses.map((b) => `${b.action}: ${b.reason}`).join('; ')}`);
     if (state.bypassArmed) console.log(`bypass ARMED: ${state.bypassArmed.reason}`);
     if ((state.waits || []).length) console.log(`past waits: ${state.waits.length}`);
