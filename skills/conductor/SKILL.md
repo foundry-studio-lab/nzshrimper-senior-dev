@@ -22,8 +22,11 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/state-cli.mjs" <subcommand> [flags]
 1. Run `node <plugin>/scripts/state-cli.mjs status` (the session bootstrap
    gives the exact path). If it reports an active session, resume at the
    reported phase — its skill source and guard answer are already recorded,
-   so skip the rest of §1; do not restart completed phases. If it prints a
-   `codex:` update line, offer `codex update` before the first Codex pass —
+   so skip the rest of §1; do not restart completed phases. On resume also
+   run `state-cli guard status`; if it prints `stale`, run `state-cli guard
+   install` (consent already given) so the hooks carry the current gate
+   logic. If it prints a `codex:` update line, offer `codex update` before
+   the first Codex pass —
    the review lanes use whatever CLI is on PATH.
 2. **Skill source (fresh run only, before classifying).** Decide which skills
    fill the process phases this run. Run `node <plugin>/scripts/state-cli.mjs
@@ -215,15 +218,22 @@ nearest built-in; never silently skip a step.
 
 ## Model economy
 
-Model tiering for subagent dispatches (implementation, fixes, reviews)
-follows the Model Selection section of
-`superpowers:subagent-driven-development` — follow it; don't improvise your
-own buckets. The conductor adds two rules: specify the model explicitly on
-EVERY dispatch (an omitted model silently inherits the session's, usually
-most expensive, model), and give every dispatch a fully scoped brief —
-complete requirements, exact interfaces and file paths, verification
-commands, and a report contract. A fresh subagent inherits nothing; the
-brief is the whole task.
+Tiers come from config, not memory. Before EVERY subagent dispatch run
+`state-cli dispatch --phase <phase>` and pass the printed `claude=` tier as
+`model:` on the Agent call. The printed tier is a floor: to raise it, name
+one of the SDD complexity signals and record it —
+`state-cli dispatch --phase <phase> --claude <tier> --reason "<signal>"` —
+where the signals are: multi-file integration, debugging, design judgement,
+a subtle or risky diff, or fix-loop escalation at rounds 4–5. Never pass a
+tier below the floor; the CLI refuses it. Brainstorm, plan, worktree,
+verify, docs, and investigate run inline on the controller and are never
+dispatched. `state-cli models --phase <phase>` is the read-only lookup
+(use it for the Codex effort and the adjudicate tier). Show and change the
+table with `/senior-dev:skills` and `state-cli skills-config set-models`.
+
+Every dispatch still carries a fully scoped brief — complete requirements,
+exact interfaces and file paths, verification commands, and a report
+contract. A fresh subagent inherits nothing.
 
 ## 3. Review phase (every lane except docs-only/investigation)
 
@@ -231,12 +241,23 @@ brief is the whole task.
    (or `/review` on older versions) on the phase diff. Fix findings via
    `superpowers:systematic-debugging` + TDD, never by patching blind.
    - Record: `state-cli review --phase <phase> --reviewer claude --verdict <V> --cycle <n>`
-2. Codex pass (READ-ONLY — `/codex:review` or `/codex:adversarial-review`;
-   NEVER any write-capable lane):
+2. Codex pass (READ-ONLY, never `--write`):
    - Capture `git status --porcelain` and `git log -1 --format=%H` BEFORE.
-   - Ask Codex to review the phase diff and reply with ONLY:
-     `{"verdict":"APPROVED"|"NEEDS_REVISION","concerns":[],"missedCases":[],"suggestions":[]}`
-   - Reply isn't that exact JSON contract? Re-ask ONCE for JSON-only. Still
+   - Read the effort: `state-cli models --phase review` for a per-phase pass,
+     `state-cli models --phase finish` for the final whole-branch pass →
+     `codex=<effort>`. (The lookup names the review's own tier row, not the
+     phase being reviewed, which has no Codex effort.)
+   - Locate the codex plugin's companion script:
+     `ls -d ~/.claude/plugins/cache/*/codex/*/scripts/codex-companion.mjs | tail -1`
+     (the codex plugin's own `${CLAUDE_PLUGIN_ROOT}` is not visible from here).
+     Not found → run `/codex:review` instead and record
+     `state-cli degrade --wanted "codex task --effort" --used "/codex:review" --reason "companion script not found"`.
+   - Run `node <that path> task --fresh --effort <effort> "<prompt>"` with the
+     prompt built from `references/codex-review-prompt.md` (fill the diff range
+     and phase). It asks for the JSON verdict as the only reply and tells Codex
+     to check any repo document or policy the diff touches.
+     `/codex:adversarial-review` stays available to the operator directly.
+   - Reply isn't the exact JSON contract? Re-ask ONCE for JSON-only. Still
      not JSON → record `NEEDS_REVISION` and tell the operator.
    - Re-run the two git commands AFTER. Any difference = Codex wrote to the
      repo: stop everything and tell the operator immediately.
@@ -246,6 +267,28 @@ brief is the whole task.
    over from a prior phase's reviews. **Cycle cap is 3** (the CLI enforces
    it). At the cap: stop iterating, present both positions to the operator,
    let them decide.
+
+3a. **Adjudication (split verdict).** When the two reviewers' latest
+   verdicts for the phase differ, do not start cycle `n+1` yet:
+   - `state-cli models --phase adjudicate` → the adjudicator tier.
+   - Dispatch ONE subagent on that tier with: the rejecting reviewer's
+     concerns verbatim, the diff range, the approving reviewer's reasoning
+     if any, and this reply contract as the only permitted output:
+     `{"concerns":[{"id":"<n>","decision":"uphold"|"overrule","reason":"<text>"}]}`
+     Record the dispatch: `state-cli dispatch --phase adjudicate`.
+   - Non-JSON reply → treat every concern as upheld and say so.
+   - Any concern upheld → the fix loop for the upheld ones; re-review at
+     cycle `n+1`. Do NOT record an overrule for this cycle: an overrule is
+     reviewer-wide and would clear the upheld concerns too. Overruled
+     concerns simply need no fix.
+   - Every concern overruled → ask the operator ONE question listing each
+     concern with the adjudicator's reason. On yes:
+     `state-cli review --phase <phase> --reviewer <rejecting> --cycle <n> --overrule --reason "<operator's words>"`
+     — the phase now counts as approved. On no → the fix loop.
+   - Optionally record upheld ones for the audit trail:
+     `state-cli review ... --cycle <n> --uphold --reason "<why>"`.
+   Adjudication consumes no review cycle. You never arm an overrule
+   yourself; only the operator's yes clears a block.
 
 The §5 final pass over the whole branch diff uses this same contract and
 records both reviewer passes as `--phase finish`.
@@ -282,7 +325,8 @@ branch exists) and goes straight to the sweep.
 4. `state-cli finish` — archives state to `.senior-dev/history/` (refuses
    if gate items are still open; see "Gates and bypass").
 5. Report to the operator with the sweep evidence pasted verbatim — actual
-   command output, never assertions.
+   command output, never assertions — and the `models used:` and
+   `adjudications:` lines from `state-cli status` when present.
 
 ## Red flags — you are rationalizing if you think:
 

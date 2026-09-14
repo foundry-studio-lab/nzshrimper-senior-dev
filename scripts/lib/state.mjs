@@ -63,6 +63,48 @@ export function statePath(repoRoot) {
 
 export const VALID_SOURCES = ['own', 'superpowers', 'combo', 'suggest'];
 
+export const CLAUDE_TIERS = ['haiku', 'sonnet', 'opus', 'fable'];
+export const CODEX_EFFORTS = ['low', 'medium', 'high', 'xhigh'];
+export const TIER_RANK = Object.fromEntries(CLAUDE_TIERS.map((t, i) => [t, i]));
+// Every phase from every chain (chain order, deduplicated), then the
+// adjudicate pseudo-phase - the only non-chain key the models map accepts.
+export const MODEL_PHASES = [...new Set([...Object.values(CHAINS).flat(), 'adjudicate'])];
+// Built-in "Balanced" floors. Phases absent here run inline on the controller.
+export const DEFAULT_MODELS = {
+  implement:  { claude: 'sonnet' },
+  review:     { claude: 'sonnet', codex: 'medium' },
+  debug:      { claude: 'opus' },
+  finish:     { claude: 'opus', codex: 'high' },
+  adjudicate: { claude: 'fable' },
+};
+
+function isPlainObject(v) {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+function validModelEntry(v) {
+  if (!isPlainObject(v)) return false;
+  for (const [k, val] of Object.entries(v)) {
+    if (k === 'claude') { if (!CLAUDE_TIERS.includes(val)) return false; }
+    else if (k === 'codex') { if (!CODEX_EFFORTS.includes(val)) return false; }
+    else return false;
+  }
+  return true;
+}
+function validModelMap(m) {
+  if (!isPlainObject(m)) return false;
+  return Object.entries(m).every(([phase, entry]) => MODEL_PHASES.includes(phase) && validModelEntry(entry));
+}
+export function validModels(models) {
+  if (!isPlainObject(models)) return false;
+  if (!Object.keys(models).every((k) => k === 'steps' || k === 'lanes')) return false;
+  if (models.steps !== undefined && !validModelMap(models.steps)) return false;
+  if (models.lanes !== undefined) {
+    if (!isPlainObject(models.lanes)) return false;
+    if (!Object.entries(models.lanes).every(([lane, m]) => CHAINS[lane] && validModelMap(m))) return false;
+  }
+  return true;
+}
+
 export function skillsConfigPath(repoRoot) {
   return join(repoRoot, '.senior-dev', 'skills.json');
 }
@@ -71,7 +113,8 @@ export function readSkillsConfig(repoRoot) {
   try {
     const c = JSON.parse(readFileSync(skillsConfigPath(repoRoot), 'utf8'));
     if (typeof c !== 'object' || c === null) return null;
-    if (c.version !== 1 && c.version !== 2) return null;
+    if (![1, 2, 3].includes(c.version)) return null;
+    if (c.models !== undefined && !validModels(c.models)) return null;
     if (c.source !== undefined && !VALID_SOURCES.includes(c.source)) return null;
     if (c.guard !== undefined && !['installed', 'declined'].includes(c.guard)) return null;
     if (c.lanes !== undefined) {
@@ -103,6 +146,29 @@ export function resolveConfiguredSkill(cfg, laneType, phase) {
   const stepVal = cfg?.steps?.[phase];
   if (stepVal !== undefined) return { value: normalizeLaneValue(stepVal), via: 'steps' };
   return { value: [], via: 'default' };
+}
+
+// Per-field merge: a lane entry that sets only `codex` keeps the `claude`
+// from steps or the default. `via` names the winning layer per field.
+export function resolveModel(cfg, laneType, phase) {
+  const out = { claude: null, codex: null, via: { claude: 'none', codex: 'none' } };
+  for (const field of ['claude', 'codex']) {
+    const lane = cfg?.models?.lanes?.[laneType]?.[phase]?.[field];
+    const step = cfg?.models?.steps?.[phase]?.[field];
+    const dflt = DEFAULT_MODELS[phase]?.[field];
+    if (lane !== undefined) { out[field] = lane; out.via[field] = 'lane'; }
+    else if (step !== undefined) { out[field] = step; out.via[field] = 'steps'; }
+    else if (dflt !== undefined) { out[field] = dflt; out.via[field] = 'default'; }
+  }
+  return out;
+}
+
+// The one place the skills.json version is decided. v3 only when the
+// optional models block is present, so machines on v0.2 keep reading
+// files that never used it.
+export function stampVersion(cfg) {
+  cfg.version = cfg.models !== undefined ? 3 : 2;
+  return cfg;
 }
 
 export function writeSkillsConfig(repoRoot, cfg) {
@@ -143,9 +209,29 @@ export function currentPhase(state) {
   return null;
 }
 
+// Per reviewer, per phase: each reviewer's latest-cycle verdict counts.
+// A phase is blocked while any reviewer's latest verdict is NEEDS_REVISION
+// that no operator-confirmed `overruled` adjudication matches. Return
+// shape {phase: verdict} is unchanged, so every caller stays as it is.
+// The review CLI refuses a second record for the same reviewer, phase and
+// cycle, so ties only arise from hand-written state; a later array entry
+// wins there.
 export function latestVerdicts(state) {
+  const perPhase = {};
+  for (const r of state.reviews || []) {
+    const per = (perPhase[r.phase] = perPhase[r.phase] || {});
+    const cur = per[r.reviewer];
+    if (!cur || (r.cycle ?? 1) >= (cur.cycle ?? 1)) per[r.reviewer] = r;
+  }
+  const overruled = new Set((state.adjudications || [])
+    .filter((a) => a.decision === 'overruled')
+    .map((a) => `${a.phase}|${a.reviewer}|${a.cycle}`));
   const by = {};
-  for (const r of state.reviews || []) by[r.phase] = r.verdict;
+  for (const [phase, per] of Object.entries(perPhase)) {
+    const blocking = Object.values(per).some((r) =>
+      r.verdict !== 'APPROVED' && !overruled.has(`${phase}|${r.reviewer}|${r.cycle ?? 1}`));
+    by[phase] = blocking ? 'NEEDS_REVISION' : 'APPROVED';
+  }
   return by;
 }
 

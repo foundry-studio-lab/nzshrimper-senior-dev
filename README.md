@@ -69,8 +69,10 @@ removes it, and confirms a clean tree before archiving the session:
   caught.
 - **Stop gate** — a session claiming "done" with open gate items gets the
   checklist back, once per distinct state (never loops).
-- **Codex phase reviews** — read-only `/codex:review` verdicts per phase, a JSON
-  verdict contract, a 3-cycle cap, and a post-review write-detection guard.
+- **Codex phase reviews** — read-only Codex passes through the codex plugin's
+  task lane at the phase's configured effort (`/codex:adversarial-review` stays
+  available), a JSON verdict contract, a 3-cycle cap, and a post-review
+  write-detection guard.
 - **Docs gate** — spec, plan, handover, affected docs.
 - **Hygiene sweep** — evidence-based zero-leftovers close.
 
@@ -103,6 +105,32 @@ run `state-cli skills-config share` to commit it for your team). A missing
 process skill is never a dead end: the conductor gives you the exact install
 command (and offers to run it) for a chain plugin, or `find-skills` candidates
 for a domain skill — nothing installs without your yes.
+
+## Models
+
+Every phase has a floor: a Claude tier for subagent dispatch and a Codex
+effort for its review pass. Defaults (Balanced): implement sonnet; review
+sonnet + Codex medium; debug opus; finish opus + Codex high; adjudicate
+fable. Brainstorm, plan, worktree, verify, docs and investigate run on the
+controller. The conductor may raise a tier on a named complexity signal and
+records why; it never lowers. `status` reports the tiers a run used.
+
+```json
+{
+  "version": 3,
+  "source": "superpowers",
+  "models": {
+    "steps": { "review": { "claude": "sonnet", "codex": "medium" } },
+    "lanes": { "feature": { "finish": { "claude": "fable", "codex": "xhigh" } } }
+  }
+}
+```
+
+A split verdict (one reviewer approves, the other rejects) goes to an
+adjudicator on the configured `adjudicate` tier (fable by default) with only
+the disputed concerns. Upheld concerns enter the fix loop. Overruled ones come
+to you as one yes or no; your yes is recorded and is the only thing that clears
+the block.
 
 ## Universal enforcement (the guard)
 
@@ -144,6 +172,10 @@ and `claude plugin update senior-dev@nzshrimper-senior-dev`, restart.</sub>
 | `/senior-dev:status` | Phase/gate/review/bypass report; warns when the Codex CLI is behind the latest release (one GET to the npm registry, see [Privacy](PRIVACY.md); `SENIOR_DEV_OFFLINE=1` disables it) |
 | `/senior-dev:bypass <reason>` | One-shot logged gate waiver |
 | `/senior-dev:skills [lane]` | Show and customise which skills fill each phase |
+| `state-cli skills-config models [--lane <lane>]` | Resolved model tiers per phase (Claude tier + Codex effort) with the winning layer |
+| `state-cli skills-config set-models [--lane <lane>] --steps 'phase=<claude>[/<codex>],...'` | Set tiers; `/<codex>` sets the effort only |
+| `state-cli dispatch --phase <p> [--claude <tier> --reason "<signal>"]` | Record a subagent dispatch; raises need a reason, lowering is refused |
+| `state-cli review ... --overrule --reason "<text>"` | Operator-confirmed overrule of one reviewer's rejection after adjudication |
 | `/senior-dev:guard [install\|status\|uninstall]` | Manage the universal enforcement git hooks |
 | `/senior-dev:finish` | Final Codex pass, sweep, archive, evidence summary |
 
