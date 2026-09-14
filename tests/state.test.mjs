@@ -102,7 +102,7 @@ test('currentPhase walks the chain', () => {
   assert.equal(currentPhase(s), 'plan');
 });
 
-test('latestVerdicts keeps the last verdict per phase', () => {
+test("latestVerdicts keeps each reviewer's latest verdict per phase", () => {
   const s = activeState({
     reviews: [
       { phase: 'implement', reviewer: 'codex', cycle: 1, verdict: 'NEEDS_REVISION' },

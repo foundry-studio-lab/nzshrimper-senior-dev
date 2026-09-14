@@ -280,6 +280,8 @@ switch (cmd) {
     if (!/^[0-9]+$/.test(cycleRaw) || parseInt(cycleRaw, 10) < 1) fail('review needs --cycle as a positive integer 1-3');
     const cycle = parseInt(cycleRaw, 10);
     if (cycle > 3) fail('cycle cap is 3 - stop iterating and escalate to the operator');
+    const dup = (state.reviews || []).find((r) => r.phase === flags.phase && r.reviewer === flags.reviewer && (r.cycle ?? 1) === cycle);
+    if (dup) fail(`review already recorded for ${flags.reviewer} on '${flags.phase}' at cycle ${cycle} (${dup.verdict}) - record the next cycle instead`);
     state.reviews.push({
       phase: flags.phase, reviewer: flags.reviewer, verdict: flags.verdict,
       cycle, at: new Date().toISOString(),
@@ -740,5 +742,5 @@ switch (cmd) {
     break;
   }
   default:
-    fail(`unknown subcommand '${cmd || ''}'. Use: init|phase|tests-green|review|docs|degrade|bypass|waiting|scratch|skills-config|skill-source|guard|status|sweep|finish`);
+    fail(`unknown subcommand '${cmd || ''}'. Use: init|phase|tests-green|review|models|dispatch|docs|degrade|bypass|waiting|scratch|skills-config|skill-source|guard|status|sweep|finish`);
 }

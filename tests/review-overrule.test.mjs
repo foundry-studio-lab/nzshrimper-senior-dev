@@ -77,3 +77,19 @@ test('uphold needs only the latest rejection and never clears the gate', () => {
   assert.ok(s.includes('review:implement=NEEDS_REVISION'));
   assert.ok(s.includes('adjudications: 0 overruled, 1 upheld'));
 });
+
+test('a second verdict at an already-recorded cycle is refused, so a rejection cannot be re-recorded away', () => {
+  const repo = makeRepo();
+  cli(repo, ['init', '--task', 't', '--type', 'quick-fix']);
+  review(repo, 'codex', 'NEEDS_REVISION');
+  const r = review(repo, 'codex', 'APPROVED');            // same cycle 1
+  assert.equal(r.status, 1);
+  assert.ok(r.out.includes('already recorded'));
+  assert.equal(readState(repo).reviews.length, 1);
+  assert.equal(review(repo, 'codex', 'APPROVED', 2).status, 0);   // next cycle is the way
+  // an overruled cycle cannot receive a fresh rejection that would inherit the overrule
+  review(repo, 'claude', 'NEEDS_REVISION', 3);
+  review(repo, 'codex', 'APPROVED', 3);
+  assert.equal(cli(repo, ['review', '--phase', 'implement', '--reviewer', 'claude', '--cycle', '3', '--overrule', '--reason', 'outside the diff']).status, 0);
+  assert.equal(review(repo, 'claude', 'NEEDS_REVISION', 3).status, 1);
+});

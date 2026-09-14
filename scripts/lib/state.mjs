@@ -213,6 +213,9 @@ export function currentPhase(state) {
 // A phase is blocked while any reviewer's latest verdict is NEEDS_REVISION
 // that no operator-confirmed `overruled` adjudication matches. Return
 // shape {phase: verdict} is unchanged, so every caller stays as it is.
+// The review CLI refuses a second record for the same reviewer, phase and
+// cycle, so ties only arise from hand-written state; a later array entry
+// wins there.
 export function latestVerdicts(state) {
   const perPhase = {};
   for (const r of state.reviews || []) {
