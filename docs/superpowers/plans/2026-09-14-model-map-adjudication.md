@@ -839,7 +839,7 @@ test('--by is validated and honours a configured adjudicate tier', () => {
   review(repo, 'claude', 'APPROVED');
   assert.ok(cli(repo, OVER).out.includes('(by opus)'));
   cli(repo, ['review', '--phase', 'implement', '--reviewer', 'codex', '--verdict', 'NEEDS_REVISION', '--cycle', '2']);
-  assert.equal(cli(repo, [...OVER.slice(0, 5), '2', '--overrule', '--reason', 'x', '--by', 'gpt']).status, 1);
+  assert.equal(cli(repo, [...OVER.slice(0, 6), '2', '--overrule', '--reason', 'x', '--by', 'gpt']).status, 1);
 });
 
 test('overrule preconditions: latest rejection at that cycle, other reviewer approved, a reason', () => {
@@ -855,7 +855,7 @@ test('overrule preconditions: latest rejection at that cycle, other reviewer app
   assert.equal(cli(repo, [...OVER, '--uphold']).status, 1);      // not both
   review(repo, 'codex', 'NEEDS_REVISION', 2);
   assert.equal(cli(repo, OVER).status, 1);                       // cycle 1 is no longer codex's latest
-  assert.equal(cli(repo, [...OVER.slice(0, 5), '2', '--overrule', '--reason', 'ok']).status, 0);
+  assert.equal(cli(repo, [...OVER.slice(0, 6), '2', '--overrule', '--reason', 'ok']).status, 0);
   assert.equal(readState(repo).adjudications.length, 1);
 });
 
@@ -1133,6 +1133,16 @@ For model tiers, record picks with
 ```
 
 Keep the frontmatter unchanged.
+
+- [ ] **Step 5b: Extend "## 5. Finish" step 5 of `skills/conductor/SKILL.md`**
+
+Change the step to read:
+
+```markdown
+5. Report to the operator with the sweep evidence pasted verbatim — actual
+   command output, never assertions — and the `models used:` and
+   `adjudications:` lines from `state-cli status` when present.
+```
 
 - [ ] **Step 6: Append to `tests/SMOKE.md`**
 
