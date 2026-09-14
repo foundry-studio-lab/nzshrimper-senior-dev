@@ -326,7 +326,7 @@ switch (cmd) {
     // A reason is only meaningful on a raise; refusing it otherwise means the
     // ledger never silently loses one (and the ledger's `reason` stays truthful).
     if (flags.reason !== undefined && reason === null) {
-      fail(`--reason only applies when raising above the floor (${floor}); pass --claude <tier above ${floor}> with it`);
+      fail(`--reason only applies when raising above the floor (${floor}) - pass --claude <tier above ${floor}> with it`);
     }
     state.dispatches = state.dispatches || [];
     state.dispatches.push({ phase: flags.phase, claude: tier, floor, reason, at: new Date().toISOString() });

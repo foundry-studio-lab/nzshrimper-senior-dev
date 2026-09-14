@@ -232,6 +232,9 @@ export function latestVerdicts(state) {
     .filter((a) => a.decision === 'overruled')
     .map((a) => `${a.phase}|${a.reviewer}|${a.cycle}`));
   const by = {};
+  // ponytail: O(n²) over review records via latestReview; n is at most two
+  // reviewers × three cycles × a handful of phases. Group in one pass if a
+  // state ever carries hundreds of reviews.
   for (const { phase, reviewer } of state.reviews || []) {
     const r = latestReview(state, phase, reviewer);
     const blocking = r.verdict !== 'APPROVED' && !overruled.has(`${phase}|${reviewer}|${r.cycle ?? 1}`);

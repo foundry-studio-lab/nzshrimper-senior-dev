@@ -10,6 +10,13 @@
 
 **Spec:** `docs/superpowers/specs/2026-09-14-model-map-adjudication-design.md`
 
+> **Superseded detail (0.3.1):** this plan (Task 3 text, its test at "models
+> without --lane", and the `models` snippet) had `skills-config models` with
+> no `--lane` and no session print a flat "steps view (no lane)". Since 0.3.1
+> it defaults to `feature`, the same as `skills-config resolve`, so
+> `/senior-dev:skills` shows both tables at one scope. The spec's CLI table
+> is the current contract; the snippets below are the 0.3.0 build as written.
+
 ## Global Constraints
 
 - Claude tiers: exactly `['haiku', 'sonnet', 'opus', 'fable']`, ranked in that order.
