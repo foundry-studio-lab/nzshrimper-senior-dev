@@ -54,3 +54,10 @@ Setup: `mkdir -p <scratch>/sd-smoke && cd <scratch>/sd-smoke && git init && git 
         quick-fix escalation have passed smoke but not a real production
         firing - treat their first real-world use with a skeptical eye and
         verify state afterwards.
+23. [ ] Split verdict: stage claude APPROVED + codex NEEDS_REVISION on
+        `implement` with verify/docs done -> `git push` BLOCKED by gate and
+        by the hook -> `review --overrule` with a reason -> push ALLOWED;
+        `status` shows `adjudications: 1 overruled, 0 upheld`.
+24. [ ] `dispatch --phase implement --claude haiku` refuses ("never lowers");
+        `--claude opus` without `--reason` refuses; with `--reason` records
+        and `status` shows `models used:` with the raise.
