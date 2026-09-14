@@ -12,6 +12,7 @@ import {
   CHAINS, DOCS_GATE, findRepoRoot, readState, writeState, statePath,
   hasActiveSession, currentPhase, latestVerdicts, openGateItems, ensureExcluded,
   VALID_SOURCES, readSkillsConfig, writeSkillsConfig, resolveConfiguredSkill, normalizeLaneValue,
+  stampVersion,
 } from './lib/state.mjs';
 import { codexUpdateNotice } from './lib/codex-check.mjs';
 
@@ -429,8 +430,8 @@ switch (cmd) {
         chmodSync(p, 0o755);
       }
       const cfg = readSkillsConfig(repoRoot) || { version: 2, source: 'superpowers', shared: false };
-      cfg.version = 2;
       cfg.guard = 'installed';
+      stampVersion(cfg);
       writeSkillsConfig(repoRoot, cfg);
       ensureExcluded(repoRoot);
       console.log(`guard installed: bundle at .senior-dev/guard/, hooks (${GUARD_HOOKS.join(', ')}) in ${dir}`);
@@ -487,11 +488,11 @@ switch (cmd) {
         fail(`skills-config set needs --source ${VALID_SOURCES.join('|')}`);
       }
       const existing = readSkillsConfig(repoRoot) || {};
-      // version:2 unconditionally - readSkillsConfig accepts both, and this
-      // is the only shape that can carry the guard/lanes fields preserved
-      // below without them being silently dropped on a later `set`.
+      // readSkillsConfig accepts v1-v3, and this is the only shape that can
+      // carry the guard/lanes/models fields preserved below without them
+      // being silently dropped on a later `set`. stampVersion below decides
+      // 2 vs 3 from whether models survived.
       const cfg = {
-        version: 2,
         source: flags.source,
         shared: existing.shared === true,
       };
@@ -499,6 +500,8 @@ switch (cmd) {
       else if (existing.steps) cfg.steps = existing.steps;
       if (existing.guard !== undefined) cfg.guard = existing.guard;
       if (existing.lanes !== undefined) cfg.lanes = existing.lanes;
+      if (existing.models !== undefined) cfg.models = existing.models;
+      stampVersion(cfg);
       writeSkillsConfig(repoRoot, cfg);
       ensureExcluded(repoRoot);
       console.log(`skills config: source=${cfg.source}${cfg.steps ? ' steps=' + JSON.stringify(cfg.steps) : ''}`);
@@ -532,9 +535,9 @@ switch (cmd) {
         laneMap[phase] = skills.length === 1 ? skills[0] : skills;
       }
       const cfg = readSkillsConfig(repoRoot) || { version: 2, source: 'superpowers', shared: false };
-      cfg.version = 2;
       cfg.lanes = cfg.lanes || {};
       cfg.lanes[lane] = { ...(cfg.lanes[lane] || {}), ...laneMap };
+      stampVersion(cfg);
       writeSkillsConfig(repoRoot, cfg);
       ensureExcluded(repoRoot);
       console.log(`lane '${lane}' skills: ${JSON.stringify(cfg.lanes[lane])}`);
