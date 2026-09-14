@@ -171,7 +171,11 @@ verdict changes only at the next cycle or by an overrule.
 | `models` or `dispatch` without a session | Fail: `no active senior-dev session`. |
 | `dispatch --claude` below the floor | Fail; nothing recorded. |
 | `dispatch --claude` above the floor without `--reason` | Fail; nothing recorded. |
+| `dispatch --reason` without a raise (no `--claude`, or `--claude` at the floor) | Fail; nothing recorded (0.3.1). |
+| `models --json <value>` | Fail: `--json` takes no value (0.3.1). |
 | `--overrule` without a matching `NEEDS_REVISION`, or when the other reviewer also rejected | Fail; nothing recorded. |
+| `--overrule` or `--uphold` beside `--verdict` | Fail; nothing recorded (0.3.1). |
+| `set-models` / `set-lane` with an empty `--steps`, a phase named twice, or (`set-models`) more than one `/` in an entry | Fail; nothing written (0.3.1). |
 | Adjudicator returns non-JSON | All concerns upheld; fix loop; conductor reports it. |
 | Codex `task` lane writes to the repo | Existing write-detection: stop, tell the operator. |
 
@@ -212,7 +216,8 @@ Node tests, no frameworks, in `tests/`:
 ## 10. Versioning and docs
 
 - Version 0.3.0 in both `.claude-plugin/plugin.json` and
-  `.claude-plugin/marketplace.json`.
+  `.claude-plugin/marketplace.json` (0.3.1 after the hygiene pass that
+  added the refusals noted in §4 and §7).
 - README: skills.json v3 example; commands table rows for `models`,
   `set-models`, `dispatch`, `review --overrule`; a short "Models" section
   after "Skills".

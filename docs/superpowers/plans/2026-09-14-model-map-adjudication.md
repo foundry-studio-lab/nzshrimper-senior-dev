@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-09-14-model-map-adjudication-design.md`
 
-> **Superseded detail (0.3.1):** this plan (Task 3 text, its test at "models
+> **Superseded detail (0.3.1):** this plan (Task 2 text, its test at "models
 > without --lane", and the `models` snippet) had `skills-config models` with
 > no `--lane` and no session print a flat "steps view (no lane)". Since 0.3.1
 > it defaults to `feature`, the same as `skills-config resolve`, so

@@ -2,12 +2,13 @@
 
 ## 0.3.1 — 2026-09-14
 
-Hygiene pass over the 0.3.0 CLI: every input that used to be dropped or
-merged silently is now refused with a message, and nothing is written on a
-refusal.
+Hygiene pass over the 0.3.0 CLI: the inputs below used to be dropped or
+merged silently and are now refused with a message, and nothing is written
+on a refusal.
 
 - `skills-config set-models` and `set-lane` refuse an empty `--steps` and a
-  `--steps` that names the same phase twice.
+  `--steps` that names the same phase twice; `set-models` also refuses an
+  entry with more than one `/`.
 - `dispatch --reason` is refused unless a tier is being raised, so the
   dispatch ledger never records a reason it threw away.
 - `models --json` refuses a value (`--json true` used to print the text

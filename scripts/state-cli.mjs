@@ -144,7 +144,9 @@ function parseModelSteps(raw, allowedPhases) {
     if (eq < 1) fail(`bad --steps entry '${t}', expected phase=<claude>[/<codex>] or phase=/<codex>`);
     const phase = t.slice(0, eq).trim();
     if (!allowedPhases.includes(phase)) fail(`phase '${phase}' is not valid here (${allowedPhases.join(', ')})`);
-    const [claude, codex] = t.slice(eq + 1).split('/').map((s) => s.trim());
+    const segments = t.slice(eq + 1).split('/').map((s) => s.trim());
+    if (segments.length > 2) fail(`bad --steps entry '${t}': at most one '/' (phase=<claude>[/<codex>])`);
+    const [claude, codex] = segments;
     const entry = {};
     if (claude) {
       if (!CLAUDE_TIERS.includes(claude)) fail(`claude tier must be one of: ${CLAUDE_TIERS.join(', ')}`);

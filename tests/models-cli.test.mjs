@@ -78,6 +78,7 @@ test('set-models rejects bad lanes, phases, tiers, efforts and empty entries', (
     ['--steps', 'review=/max'],
     ['--steps', 'implement='],
     ['--steps', 'implement'],
+    ['--steps', 'review=sonnet/medium/garbage'],   // a third segment is refused, not dropped
     ['--steps'],
   ]) {
     const r = cli(repo, ['skills-config', 'set-models', ...args]);
