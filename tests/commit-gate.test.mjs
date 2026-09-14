@@ -333,3 +333,25 @@ test('commit-gate blocks from inside a linked worktree when the main checkout ha
   assert.equal(r.blocked, true);
   assert.ok(r.msg.includes('/senior-dev:status'));
 });
+
+test('split verdict blocks integration until that rejection is overruled; an upheld one keeps blocking', () => {
+  const repo = makeRepo();
+  const base = featureState({
+    phases: { verify: { status: 'done' } },
+    docsGate: { spec: true, plan: true, handover: true, affectedDocs: true },
+    reviews: [
+      { phase: 'implement', reviewer: 'claude', verdict: 'APPROVED', cycle: 1 },
+      { phase: 'implement', reviewer: 'codex', verdict: 'NEEDS_REVISION', cycle: 1 },
+    ],
+  });
+  writeState(repo, base);
+  const r = gate(repo, 'git push origin main');
+  assert.equal(r.blocked, true);
+  assert.ok(r.msg.includes("review for 'implement' is NEEDS_REVISION"), r.msg);
+  writeState(repo, { ...base, adjudications: [{ phase: 'implement', reviewer: 'codex', cycle: 1, decision: 'upheld' }] });
+  assert.equal(gate(repo, 'git push origin main').blocked, true);
+  writeState(repo, { ...base, adjudications: [{ phase: 'implement', reviewer: 'codex', cycle: 2, decision: 'overruled' }] });
+  assert.equal(gate(repo, 'git push origin main').blocked, true);   // wrong cycle
+  writeState(repo, { ...base, adjudications: [{ phase: 'implement', reviewer: 'codex', cycle: 1, decision: 'overruled' }] });
+  assert.equal(gate(repo, 'git push origin main').blocked, false);
+});

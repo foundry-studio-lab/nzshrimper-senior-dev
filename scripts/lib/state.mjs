@@ -209,28 +209,34 @@ export function currentPhase(state) {
   return null;
 }
 
+// The one definition of "a reviewer's latest verdict on a phase": the
+// highest-cycle record, a missing cycle counting as 1. The review CLI
+// refuses a second record for the same reviewer, phase and cycle, so ties
+// only arise from hand-written state; a later array entry wins there. Both
+// the gates (via latestVerdicts) and the adjudication CLI read through this.
+export function latestReview(state, phase, reviewer) {
+  let latest = null;
+  for (const r of state.reviews || []) {
+    if (r.phase !== phase || r.reviewer !== reviewer) continue;
+    if (!latest || (r.cycle ?? 1) >= (latest.cycle ?? 1)) latest = r;
+  }
+  return latest;
+}
+
 // Per reviewer, per phase: each reviewer's latest-cycle verdict counts.
 // A phase is blocked while any reviewer's latest verdict is NEEDS_REVISION
 // that no operator-confirmed `overruled` adjudication matches. Return
 // shape {phase: verdict} is unchanged, so every caller stays as it is.
-// The review CLI refuses a second record for the same reviewer, phase and
-// cycle, so ties only arise from hand-written state; a later array entry
-// wins there.
 export function latestVerdicts(state) {
-  const perPhase = {};
-  for (const r of state.reviews || []) {
-    const per = (perPhase[r.phase] = perPhase[r.phase] || {});
-    const cur = per[r.reviewer];
-    if (!cur || (r.cycle ?? 1) >= (cur.cycle ?? 1)) per[r.reviewer] = r;
-  }
   const overruled = new Set((state.adjudications || [])
     .filter((a) => a.decision === 'overruled')
     .map((a) => `${a.phase}|${a.reviewer}|${a.cycle}`));
   const by = {};
-  for (const [phase, per] of Object.entries(perPhase)) {
-    const blocking = Object.values(per).some((r) =>
-      r.verdict !== 'APPROVED' && !overruled.has(`${phase}|${r.reviewer}|${r.cycle ?? 1}`));
-    by[phase] = blocking ? 'NEEDS_REVISION' : 'APPROVED';
+  for (const { phase, reviewer } of state.reviews || []) {
+    const r = latestReview(state, phase, reviewer);
+    const blocking = r.verdict !== 'APPROVED' && !overruled.has(`${phase}|${reviewer}|${r.cycle ?? 1}`);
+    if (blocking) by[phase] = 'NEEDS_REVISION';
+    else if (by[phase] === undefined) by[phase] = 'APPROVED';
   }
   return by;
 }

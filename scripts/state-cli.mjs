@@ -10,7 +10,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   CHAINS, DOCS_GATE, findRepoRoot, readState, writeState, statePath,
-  hasActiveSession, currentPhase, latestVerdicts, openGateItems, ensureExcluded,
+  hasActiveSession, currentPhase, latestVerdicts, latestReview, openGateItems, ensureExcluded,
   VALID_SOURCES, readSkillsConfig, writeSkillsConfig, resolveConfiguredSkill, normalizeLaneValue,
   stampVersion, resolveModel, MODEL_PHASES, CLAUDE_TIERS, CODEX_EFFORTS, TIER_RANK,
 } from './lib/state.mjs';
@@ -155,8 +155,10 @@ function parseModelSteps(raw, allowedPhases) {
       entry.codex = codex;
     }
     if (!entry.claude && !entry.codex) fail(`bad --steps entry '${t}': nothing to set`);
+    if (map[phase]) fail(`--steps names phase '${phase}' twice - give each phase once`);
     map[phase] = entry;
   }
+  if (!Object.keys(map).length) fail('--steps is empty - nothing to set');
   return map;
 }
 
@@ -241,15 +243,14 @@ switch (cmd) {
       if (flags.uphold !== undefined && flags.uphold !== true) fail('review --uphold does not take a value');
       const decision = flags.overrule === true ? 'overruled' : 'upheld';
       const flagName = decision === 'overruled' ? '--overrule' : '--uphold';
+      if (flags.verdict !== undefined) fail(`review ${flagName} does not take --verdict - it adjudicates the verdict already recorded at that cycle`);
       requireValues('review', flags, ['phase', 'reviewer', 'cycle', 'reason', 'by']);
       if (!flags.phase) fail('review needs --phase <name>');
       if (!['codex', 'claude'].includes(flags.reviewer)) fail('review needs --reviewer codex|claude');
       if (!/^[0-9]+$/.test(String(flags.cycle ?? ''))) fail('review needs --cycle <n>');
       const cycle = parseInt(flags.cycle, 10);
       if (typeof flags.reason !== 'string' || !flags.reason.trim()) fail(`review ${flagName} needs --reason "<text>"`);
-      const latestOf = (reviewer) => (state.reviews || [])
-        .filter((r) => r.phase === flags.phase && r.reviewer === reviewer)
-        .reduce((a, b) => (!a || (b.cycle ?? 1) >= (a.cycle ?? 1) ? b : a), null);
+      const latestOf = (reviewer) => latestReview(state, flags.phase, reviewer);
       const mine = latestOf(flags.reviewer);
       if (!mine || (mine.cycle ?? 1) !== cycle || mine.verdict !== 'NEEDS_REVISION') {
         fail(`no NEEDS_REVISION from ${flags.reviewer} at cycle ${cycle} is the latest verdict for '${flags.phase}'`);
@@ -295,6 +296,7 @@ switch (cmd) {
     requireValues('models', flags, ['phase']);
     if (!flags.phase) fail('models needs --phase <phase>');
     if (!MODEL_PHASES.includes(flags.phase)) fail(`models --phase must be one of: ${MODEL_PHASES.join(', ')}`);
+    if (flags.json !== undefined && flags.json !== true) fail('models --json does not take a value');
     const r = resolveModel(readSkillsConfig(repoRoot), state.type, flags.phase);
     if (flags.json === true) console.log(JSON.stringify(r));
     else console.log(`claude=${r.claude || 'none'} codex=${r.codex || 'none'}`);
@@ -320,6 +322,11 @@ switch (cmd) {
         reason = flags.reason.trim();
       }
       tier = flags.claude;
+    }
+    // A reason is only meaningful on a raise; refusing it otherwise means the
+    // ledger never silently loses one (and the ledger's `reason` stays truthful).
+    if (flags.reason !== undefined && reason === null) {
+      fail(`--reason only applies when raising above the floor (${floor}); pass --claude <tier above ${floor}> with it`);
     }
     state.dispatches = state.dispatches || [];
     state.dispatches.push({ phase: flags.phase, claude: tier, floor, reason, at: new Date().toISOString() });
@@ -654,8 +661,10 @@ switch (cmd) {
         if (!CHAINS[lane].includes(phase)) fail(`phase '${phase}' is not in the ${lane} chain (${CHAINS[lane].join(', ')})`);
         const skills = t.slice(eq + 1).split('|').map((s) => s.trim()).filter(Boolean);
         if (!skills.length) fail(`bad --steps entry '${t}': no skill given`);
+        if (laneMap[phase]) fail(`--steps names phase '${phase}' twice - give each phase once`);
         laneMap[phase] = skills.length === 1 ? skills[0] : skills;
       }
+      if (!Object.keys(laneMap).length) fail('--steps is empty - nothing to set');
       const cfg = readSkillsConfig(repoRoot) || { version: 2, source: 'superpowers', shared: false };
       cfg.lanes = cfg.lanes || {};
       cfg.lanes[lane] = { ...(cfg.lanes[lane] || {}), ...laneMap };
@@ -683,17 +692,18 @@ switch (cmd) {
       break;
     }
     if (sub === 'models') {
+      // Same default as `resolve`, so /senior-dev:skills shows both tables at
+      // one scope: the active session's lane, else feature.
       let lane = typeof flags.lane === 'string' ? flags.lane : null;
       if (!lane) {
         const st = readState(repoRoot);
-        lane = (hasActiveSession(st) && CHAINS[st.type]) ? st.type : null;
+        lane = (hasActiveSession(st) && CHAINS[st.type]) ? st.type : 'feature';
       }
-      if (lane && !CHAINS[lane]) fail(`models --lane must be one of: ${Object.keys(CHAINS).join(', ')}`);
+      if (!CHAINS[lane]) fail(`models --lane must be one of: ${Object.keys(CHAINS).join(', ')}`);
       const cfg = readSkillsConfig(repoRoot);
-      const phases = lane ? [...CHAINS[lane], 'adjudicate'] : MODEL_PHASES;
-      console.log(`# resolved models - ${lane ? 'lane: ' + lane : 'steps view (no lane)'}`);
-      for (const phase of phases) {
-        const r = resolveModel(cfg, lane || '', phase);
+      console.log(`# resolved models - lane: ${lane}`);
+      for (const phase of [...CHAINS[lane], 'adjudicate']) {
+        const r = resolveModel(cfg, lane, phase);
         const parts = [];
         if (r.claude) parts.push(`claude=${r.claude} (${r.via.claude})`);
         if (r.codex) parts.push(`codex=${r.codex} (${r.via.codex})`);

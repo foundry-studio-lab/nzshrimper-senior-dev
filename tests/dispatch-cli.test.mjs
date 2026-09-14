@@ -76,3 +76,40 @@ test('dispatch honours a configured floor and status reports models used', () =>
   const s = cli(repo, ['status']).out;
   assert.ok(s.includes('models used: opus×1, sonnet×1, fable×1 (raised: review "subtle concurrency diff")'), s);
 });
+
+test('dispatch refuses --reason when nothing is raised, so a reason is never dropped silently', () => {
+  const repo = makeRepo();
+  cli(repo, ['init', '--task', 't', '--type', 'feature']);
+  let r = cli(repo, ['dispatch', '--phase', 'implement', '--reason', 'multi-file integration']);
+  assert.equal(r.status, 1);
+  assert.ok(r.out.includes('--reason'), r.out);
+  r = cli(repo, ['dispatch', '--phase', 'implement', '--claude', 'sonnet', '--reason', 'multi-file integration']);
+  assert.equal(r.status, 1);
+  assert.ok(r.out.includes('--reason'), r.out);
+  assert.deepEqual(readState(repo).dispatches, []);
+});
+
+test('models --json takes no value', () => {
+  const repo = makeRepo();
+  cli(repo, ['init', '--task', 't', '--type', 'feature']);
+  const r = cli(repo, ['models', '--phase', 'review', '--json', 'true']);
+  assert.equal(r.status, 1);
+  assert.ok(r.out.includes('--json'), r.out);
+});
+
+test('a lane-level floor outranks the steps floor for dispatch, and only in that lane', () => {
+  const cfg = { version: 3, source: 'superpowers', shared: false,
+    models: { steps: { implement: { claude: 'sonnet' } }, lanes: { feature: { implement: { claude: 'opus' } } } } };
+  const feature = makeRepo();
+  writeSkillsConfig(feature, cfg);
+  cli(feature, ['init', '--task', 't', '--type', 'feature']);
+  assert.equal(cli(feature, ['dispatch', '--phase', 'implement']).out.trim(), 'claude=opus codex=none');
+  const r = cli(feature, ['dispatch', '--phase', 'implement', '--claude', 'sonnet']);
+  assert.equal(r.status, 1);
+  assert.ok(r.out.includes('never lowers the configured floor (opus)'), r.out);
+  assert.deepEqual(readState(feature).dispatches.map((d) => [d.claude, d.floor]), [['opus', 'opus']]);
+  const quick = makeRepo();
+  writeSkillsConfig(quick, cfg);
+  cli(quick, ['init', '--task', 't', '--type', 'quick-fix']);
+  assert.equal(cli(quick, ['dispatch', '--phase', 'implement']).out.trim(), 'claude=sonnet codex=none');
+});

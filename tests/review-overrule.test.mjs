@@ -93,3 +93,17 @@ test('a second verdict at an already-recorded cycle is refused, so a rejection c
   assert.equal(cli(repo, ['review', '--phase', 'implement', '--reviewer', 'claude', '--cycle', '3', '--overrule', '--reason', 'outside the diff']).status, 0);
   assert.equal(review(repo, 'claude', 'NEEDS_REVISION', 3).status, 1);
 });
+
+test('--overrule and --uphold refuse a --verdict, so a verdict is never dropped silently', () => {
+  const repo = makeRepo();
+  cli(repo, ['init', '--task', 't', '--type', 'quick-fix']);
+  review(repo, 'codex', 'NEEDS_REVISION');
+  review(repo, 'claude', 'APPROVED');
+  for (const flag of ['--overrule', '--uphold']) {
+    const r = cli(repo, ['review', '--phase', 'implement', '--reviewer', 'codex', '--cycle', '1', flag, '--verdict', 'APPROVED', '--reason', 'r']);
+    assert.equal(r.status, 1, r.out);
+    assert.ok(r.out.includes('--verdict'), r.out);
+  }
+  assert.deepEqual(readState(repo).adjudications, []);
+  assert.equal(readState(repo).reviews.length, 2);
+});

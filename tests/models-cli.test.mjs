@@ -29,9 +29,11 @@ test('models --lane prints defaults with via for a fresh repo', () => {
   assert.ok(!r.out.includes('debug:'));                 // not in the feature chain
 });
 
-test('models without --lane uses the active session lane, else the steps view', () => {
+test('models without --lane uses the active session lane, else feature (the same default as resolve)', () => {
   const repo = makeRepo();
-  assert.ok(cli(repo, ['skills-config', 'models']).out.includes('steps view'));
+  const bare = cli(repo, ['skills-config', 'models']).out;
+  assert.ok(bare.includes('lane: feature'), bare);
+  assert.ok(!bare.includes('debug:'), bare);              // feature chain, not every phase
   cli(repo, ['init', '--task', 't', '--type', 'bug-fix']);
   const r = cli(repo, ['skills-config', 'models']);
   assert.ok(r.out.includes('lane: bug-fix'));
@@ -82,4 +84,14 @@ test('set-models rejects bad lanes, phases, tiers, efforts and empty entries', (
     assert.equal(r.status, 1, args.join(' '));
   }
   assert.equal(readSkillsConfig(repo), null);   // nothing written
+});
+
+test('set-models refuses an empty --steps and a duplicated phase', () => {
+  const repo = makeRepo();
+  for (const steps of ['  ', ',', 'implement=sonnet,implement=opus', 'review=sonnet, review=/high']) {
+    const r = cli(repo, ['skills-config', 'set-models', '--steps', steps]);
+    assert.equal(r.status, 1, steps);
+    assert.ok(r.out.includes('--steps'), r.out);
+  }
+  assert.equal(readSkillsConfig(repo), null);
 });

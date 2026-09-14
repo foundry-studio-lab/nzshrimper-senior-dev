@@ -72,3 +72,13 @@ test('skills-config set preserves guard and lanes on a later source switch', () 
   assert.deepEqual(after.lanes.feature, { implement: 'my-org:builder' }); // must survive too
   assert.equal(after.version, 2);
 });
+
+test('set-lane refuses an empty --steps and a duplicated phase', () => {
+  const repo = makeRepo();
+  for (const steps of ['  ', 'implement=a,implement=b']) {
+    const r = cli(repo, ['skills-config', 'set-lane', 'feature', '--steps', steps]);
+    assert.equal(r.status, 1, steps);
+    assert.ok(r.out.includes('--steps'), r.out);
+  }
+  assert.equal(readSkillsConfig(repo), null);
+});

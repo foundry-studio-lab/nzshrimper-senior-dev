@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { latestVerdicts, integrationBlockers, openGateItems, CHAINS } from '../scripts/lib/state.mjs';
+import { latestVerdicts, latestReview, integrationBlockers, openGateItems, CHAINS } from '../scripts/lib/state.mjs';
 
 function st(reviews, adjudications = []) {
   return {
@@ -60,4 +60,15 @@ test('a review record with no cycle key counts as cycle 1', () => {
 
   const laterApproval = [...noCycle, { phase: 'implement', reviewer: 'codex', cycle: 2, verdict: 'APPROVED' }];
   assert.equal(latestVerdicts(st(laterApproval)).implement, 'APPROVED');
+});
+
+test('latestReview returns the highest-cycle record for a reviewer on a phase, else null', () => {
+  const s = st([NR('codex'), OK('claude'), OK('codex', 2)]);
+  assert.equal(latestReview(s, 'implement', 'codex').cycle, 2);
+  assert.equal(latestReview(s, 'implement', 'claude').cycle, 1);
+  assert.equal(latestReview(s, 'implement', 'nobody'), null);
+  assert.equal(latestReview(s, 'finish', 'codex'), null);
+  assert.equal(latestReview({ reviews: undefined }, 'implement', 'codex'), null);
+  const noCycleFirst = [{ phase: 'implement', reviewer: 'codex', verdict: 'NEEDS_REVISION' }, NR('codex', 2)];
+  assert.equal(latestReview(st(noCycleFirst), 'implement', 'codex').cycle, 2);
 });
