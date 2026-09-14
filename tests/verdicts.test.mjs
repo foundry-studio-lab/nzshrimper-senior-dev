@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { latestVerdicts, integrationBlockers, openGateItems, CHAINS, DOCS_GATE } from '../scripts/lib/state.mjs';
+import { latestVerdicts, integrationBlockers, openGateItems, CHAINS } from '../scripts/lib/state.mjs';
 
 function st(reviews, adjudications = []) {
   return {
@@ -46,4 +46,18 @@ test('phases resolve independently', () => {
   const v = latestVerdicts(st([OK('claude'), OK('codex'), NR('codex', 1, 'finish'), OK('claude', 1, 'finish')]));
   assert.equal(v.implement, 'APPROVED');
   assert.equal(v.finish, 'NEEDS_REVISION');
+});
+
+test('a review record with no cycle key counts as cycle 1', () => {
+  const noCycle = [
+    { phase: 'implement', reviewer: 'codex', verdict: 'NEEDS_REVISION' },
+    { phase: 'implement', reviewer: 'claude', verdict: 'APPROVED' },
+  ];
+  assert.equal(latestVerdicts(st(noCycle)).implement, 'NEEDS_REVISION');
+
+  const adj = [{ phase: 'implement', reviewer: 'codex', cycle: 1, decision: 'overruled' }];
+  assert.equal(latestVerdicts(st(noCycle, adj)).implement, 'APPROVED');
+
+  const laterApproval = [...noCycle, { phase: 'implement', reviewer: 'codex', cycle: 2, verdict: 'APPROVED' }];
+  assert.equal(latestVerdicts(st(laterApproval)).implement, 'APPROVED');
 });
