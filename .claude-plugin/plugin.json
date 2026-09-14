@@ -1,6 +1,6 @@
 {
   "name": "senior-dev",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Orchestrates a senior-dev coding session: classifies the task, enforces the right installed-skill chain (superpowers, codex, built-in reviews), gates commits and session-close on review + verification + documentation, and finishes with a zero-leftovers hygiene sweep.",
   "author": {
     "name": "Foundry Studio",

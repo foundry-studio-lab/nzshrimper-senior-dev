@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.1 — 2026-09-14
+
+- `status` (and so every conductor engage and `/senior-dev:status`) warns when
+  the Codex CLI on PATH is behind the latest release, with the `codex update`
+  fix. Nothing in the plugin pins a Codex version or model: review lanes ride
+  whatever `codex` is installed and whatever `~/.codex/config.toml` selects,
+  so a stale CLI was invisible. Fails open (no codex, no network, or
+  `SENIOR_DEV_OFFLINE=1` => silent); 1.5s network cap.
+
 ## 0.2.0 — 2026-07-08
 
 - Universal guard: git-hook enforcement (`pre-commit`, `pre-push`,

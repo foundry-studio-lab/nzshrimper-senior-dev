@@ -15,7 +15,7 @@ function makeRepo() {
 }
 function cli(repo, args) {
   try {
-    const out = execFileSync('node', [CLI, ...args], { cwd: repo, encoding: 'utf8' });
+    const out = execFileSync('node', [CLI, ...args], { cwd: repo, encoding: 'utf8', env: { ...process.env, SENIOR_DEV_OFFLINE: '1' } });
     return { status: 0, out };
   } catch (e) {
     return { status: e.status, out: (e.stdout || '') + (e.stderr || '') };

@@ -13,6 +13,7 @@ import {
   hasActiveSession, currentPhase, latestVerdicts, openGateItems, ensureExcluded,
   VALID_SOURCES, readSkillsConfig, writeSkillsConfig, resolveConfiguredSkill, normalizeLaneValue,
 } from './lib/state.mjs';
+import { codexUpdateNotice } from './lib/codex-check.mjs';
 
 function fail(msg) {
   console.error(`senior-dev: ${msg}`);
@@ -305,6 +306,8 @@ switch (cmd) {
     break;
   }
   case 'status': {
+    const codexNotice = await codexUpdateNotice();
+    if (codexNotice) console.log(codexNotice);
     const state = readState(repoRoot);
     if (!hasActiveSession(state)) {
       console.log('senior-dev: no active session in this repo.');

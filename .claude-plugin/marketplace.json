@@ -6,14 +6,14 @@
   },
   "metadata": {
     "description": "Foundry Studio's Claude Code plugins. Modern stack. Plain language. Direct contact.",
-    "version": "0.2.0"
+    "version": "0.2.1"
   },
   "plugins": [
     {
       "name": "senior-dev",
       "source": "./",
       "description": "senior-dev orchestrates a disciplined coding session in Claude Code: task classification, mandatory skill routing, hard commit and stop gates, dual-model review, a documentation gate, and a zero-leftovers finish. Built by Foundry Studio.",
-      "version": "0.2.0"
+      "version": "0.2.1"
     }
   ]
 }
