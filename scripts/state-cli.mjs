@@ -12,7 +12,7 @@ import {
   CHAINS, DOCS_GATE, findRepoRoot, readState, writeState, statePath,
   hasActiveSession, currentPhase, latestVerdicts, openGateItems, ensureExcluded,
   VALID_SOURCES, readSkillsConfig, writeSkillsConfig, resolveConfiguredSkill, normalizeLaneValue,
-  stampVersion,
+  stampVersion, resolveModel, MODEL_PHASES, CLAUDE_TIERS, CODEX_EFFORTS,
 } from './lib/state.mjs';
 import { codexUpdateNotice } from './lib/codex-check.mjs';
 
@@ -121,6 +121,33 @@ function parseSteps(raw) {
     steps[t.slice(0, eq).trim()] = t.slice(eq + 1).trim();
   }
   return steps;
+}
+
+function parseModelSteps(raw, allowedPhases) {
+  // "implement=sonnet,review=sonnet/medium,finish=/high"
+  //   -> { implement: {claude:'sonnet'}, review: {claude:'sonnet', codex:'medium'}, finish: {codex:'high'} }
+  const map = {};
+  for (const pair of raw.split(',')) {
+    const t = pair.trim();
+    if (!t) continue;
+    const eq = t.indexOf('=');
+    if (eq < 1) fail(`bad --steps entry '${t}', expected phase=<claude>[/<codex>] or phase=/<codex>`);
+    const phase = t.slice(0, eq).trim();
+    if (!allowedPhases.includes(phase)) fail(`phase '${phase}' is not valid here (${allowedPhases.join(', ')})`);
+    const [claude, codex] = t.slice(eq + 1).split('/').map((s) => s.trim());
+    const entry = {};
+    if (claude) {
+      if (!CLAUDE_TIERS.includes(claude)) fail(`claude tier must be one of: ${CLAUDE_TIERS.join(', ')}`);
+      entry.claude = claude;
+    }
+    if (codex) {
+      if (!CODEX_EFFORTS.includes(codex)) fail(`codex effort must be one of: ${CODEX_EFFORTS.join(', ')}`);
+      entry.codex = codex;
+    }
+    if (!entry.claude && !entry.codex) fail(`bad --steps entry '${t}': nothing to set`);
+    map[phase] = entry;
+  }
+  return map;
 }
 
 function requireSession(repoRoot) {
@@ -560,7 +587,45 @@ switch (cmd) {
       }
       break;
     }
-    fail('skills-config needs a subcommand: show | set | share | unshare | set-lane | resolve');
+    if (sub === 'models') {
+      let lane = typeof flags.lane === 'string' ? flags.lane : null;
+      if (!lane) {
+        const st = readState(repoRoot);
+        lane = (hasActiveSession(st) && CHAINS[st.type]) ? st.type : null;
+      }
+      if (lane && !CHAINS[lane]) fail(`models --lane must be one of: ${Object.keys(CHAINS).join(', ')}`);
+      const cfg = readSkillsConfig(repoRoot);
+      const phases = lane ? [...CHAINS[lane], 'adjudicate'] : MODEL_PHASES;
+      console.log(`# resolved models - ${lane ? 'lane: ' + lane : 'steps view (no lane)'}`);
+      for (const phase of phases) {
+        const r = resolveModel(cfg, lane || '', phase);
+        const parts = [];
+        if (r.claude) parts.push(`claude=${r.claude} (${r.via.claude})`);
+        if (r.codex) parts.push(`codex=${r.codex} (${r.via.codex})`);
+        console.log(parts.length ? `${phase}: ${parts.join(' ')}` : `${phase}: (controller inline)`);
+      }
+      break;
+    }
+    if (sub === 'set-models') {
+      requireValues('skills-config set-models', flags, ['steps', 'lane']);
+      const lane = typeof flags.lane === 'string' ? flags.lane : null;
+      if (lane && !CHAINS[lane]) fail(`set-models --lane must be one of: ${Object.keys(CHAINS).join(', ')}`);
+      if (typeof flags.steps !== 'string') fail("set-models needs --steps 'phase=<claude>[/<codex>],...'");
+      const allowed = lane ? [...CHAINS[lane], 'adjudicate'] : MODEL_PHASES;
+      const map = parseModelSteps(flags.steps, allowed);
+      const cfg = readSkillsConfig(repoRoot) || { source: 'superpowers', shared: false };
+      cfg.models = cfg.models || {};
+      const target = lane
+        ? (cfg.models.lanes = cfg.models.lanes || {}, cfg.models.lanes[lane] = cfg.models.lanes[lane] || {})
+        : (cfg.models.steps = cfg.models.steps || {});
+      for (const [phase, entry] of Object.entries(map)) target[phase] = { ...(target[phase] || {}), ...entry };
+      stampVersion(cfg);
+      writeSkillsConfig(repoRoot, cfg);
+      ensureExcluded(repoRoot);
+      console.log(`models ${lane ? `lane '${lane}'` : 'steps'}: ${JSON.stringify(target)}`);
+      break;
+    }
+    fail('skills-config needs a subcommand: show | set | share | unshare | set-lane | resolve | models | set-models');
     break;
   }
   case 'skill-source': {
