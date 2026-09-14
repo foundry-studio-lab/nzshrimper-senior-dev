@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.3.1 — 2026-09-14
+
+Hygiene pass over the 0.3.0 CLI: every input that used to be dropped or
+merged silently is now refused with a message, and nothing is written on a
+refusal.
+
+- `skills-config set-models` and `set-lane` refuse an empty `--steps` and a
+  `--steps` that names the same phase twice.
+- `dispatch --reason` is refused unless a tier is being raised, so the
+  dispatch ledger never records a reason it threw away.
+- `models --json` refuses a value (`--json true` used to print the text
+  form).
+- `review --overrule` and `--uphold` refuse a `--verdict` beside them.
+- `skills-config models` with no `--lane` and no session defaults to the
+  `feature` lane, the same as `resolve`, so `/senior-dev:skills` shows both
+  tables at one scope (it used to print a flat view of every phase).
+- Internal: one `latestReview(state, phase, reviewer)` helper in the state
+  library defines a reviewer's latest verdict; the gates and the
+  adjudication CLI both read through it. Gate behaviour is unchanged; an
+  installed guard bundle reports `stale` until `/senior-dev:guard install`
+  re-runs, and the conductor refreshes it at the next engage.
+- Tests: a split verdict through the commit gate (upheld and wrong-cycle
+  adjudications still block, an overrule clears), and a lane-level model
+  floor outranking the steps floor only in its own lane.
+
 ## 0.3.0 — 2026-09-14
 
 - Per-phase model map in `skills.json` (schema v3, optional `models`

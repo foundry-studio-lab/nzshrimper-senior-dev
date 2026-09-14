@@ -172,9 +172,9 @@ and `claude plugin update senior-dev@nzshrimper-senior-dev`, restart.</sub>
 | `/senior-dev:status` | Phase/gate/review/bypass report; warns when the Codex CLI is behind the latest release (one GET to the npm registry, see [Privacy](PRIVACY.md); `SENIOR_DEV_OFFLINE=1` disables it) |
 | `/senior-dev:bypass <reason>` | One-shot logged gate waiver |
 | `/senior-dev:skills [lane]` | Show and customise which skills fill each phase |
-| `state-cli skills-config models [--lane <lane>]` | Resolved model tiers per phase (Claude tier + Codex effort) with the winning layer |
+| `state-cli skills-config models [--lane <lane>]` | Resolved model tiers per phase (Claude tier + Codex effort) with the winning layer; defaults to the session's lane, else `feature` |
 | `state-cli skills-config set-models [--lane <lane>] --steps 'phase=<claude>[/<codex>],...'` | Set tiers; `/<codex>` sets the effort only |
-| `state-cli dispatch --phase <p> [--claude <tier> --reason "<signal>"]` | Record a subagent dispatch; raises need a reason, lowering is refused |
+| `state-cli dispatch --phase <p> [--claude <tier> --reason "<signal>"]` | Record a subagent dispatch; raises need a reason, a reason without a raise is refused, lowering is refused |
 | `state-cli review ... --overrule --reason "<text>"` | Operator-confirmed overrule of one reviewer's rejection after adjudication |
 | `/senior-dev:guard [install\|status\|uninstall]` | Manage the universal enforcement git hooks |
 | `/senior-dev:finish` | Final Codex pass, sweep, archive, evidence summary |
