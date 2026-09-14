@@ -8,13 +8,17 @@
   `skills-config set-models`, `models --phase`, and a `dispatch` ledger
   that refuses to lower a floor and requires a reason to raise one.
   `status` reports the tiers used.
-- Review adjudication: a split verdict goes to an adjudicator one tier up;
-  `review --overrule` records the operator's confirmed overrule (and
-  `--uphold` the audit trail). Nothing but the operator's yes clears a
-  block.
+- Review adjudication: a split verdict goes to an adjudicator on the
+  configured `adjudicate` tier (fable by default); `review --overrule`
+  records the operator's confirmed overrule (and `--uphold` the audit
+  trail). Nothing but the operator's yes clears a block.
 - Gate fix: verdicts now resolve per reviewer. Previously the last review
   recorded for a phase decided it, so an approval recorded after another
-  reviewer's rejection passed the gate.
+  reviewer's rejection passed the gate. Already-installed guard bundles keep
+  the old rule until `/senior-dev:guard install` re-runs; the conductor
+  refreshes a `stale` bundle automatically at the next engage or resume.
+- `review` refuses a second verdict for the same reviewer, phase and cycle;
+  record the next cycle or an overrule instead.
 - Conductor: Codex passes run through the plugin's `task --fresh --effort`
   lane with a stored read-only, JSON-first prompt.
 - Compatibility: a v3 `skills.json` is treated as absent by plugin 0.2.x

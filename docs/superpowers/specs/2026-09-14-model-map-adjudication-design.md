@@ -17,8 +17,9 @@ Two features, one release:
    the finish report shows the models a run actually used.
 2. **Review adjudication.** Today a split verdict (one reviewer APPROVED, the
    other NEEDS_REVISION) triggers a full re-review cycle. v0.3 hands only the
-   disputed concerns to an adjudicator one tier above the reviewers. Upheld
-   concerns enter the fix loop. Overruled concerns come to the operator as a
+   disputed concerns to an adjudicator on the configured `adjudicate` tier
+   (fable by default, above every default reviewer tier). Upheld concerns
+   enter the fix loop. Overruled concerns come to the operator as a
    single yes or no; only that yes clears the block.
 
 The work also fixes a latent gate bug found while reading the verdict code
@@ -113,7 +114,8 @@ inline on the controller.
 
 **Codex pass (§3 step 2)** runs
 `node <codex-plugin>/scripts/codex-companion.mjs task --fresh --effort <codex>`
-where `<codex>` comes from `state-cli models --phase <phase>`. The prompt is
+where `<codex>` comes from `state-cli models --phase review` (per-phase
+passes) or `--phase finish` (final pass). The prompt is
 the template at `skills/conductor/references/codex-review-prompt.md`: the
 diff range, an instruction to read only, an instruction to check any repo
 document or policy the diff touches, and the JSON verdict contract as the
@@ -130,11 +132,10 @@ conductor:
    that tier with: the disputed concerns verbatim, the diff range, the
    approving reviewer's reasoning if any, and this reply contract only:
    `{"concerns":[{"id":"<n>","decision":"uphold"|"overrule","reason":"<text>"}]}`.
-2. Upheld concerns go to the fix loop; the next cycle is `n+1` as today.
-3. For overruled concerns it asks the operator one question listing each
-   concern and the adjudicator's reason. On yes it records
-   `review --overrule` per reviewer with the operator's reason. On no, the
-   fix loop.
+2. Any upheld concern → the fix loop; no overrule is recorded for that cycle
+   (an overrule is reviewer-wide).
+3. Every concern overruled → one operator question; on yes `review --overrule`
+   per reviewer with the operator's reason; on no, the fix loop.
 4. A non-JSON adjudicator reply counts as all upheld. The conductor says so.
 
 Adjudication consumes no review cycle. The cycle cap of 3 is unchanged.
@@ -157,7 +158,9 @@ which keeps docs-only lanes (no Codex pass) working. The return shape
 `{ phase: verdict }` is unchanged, so `status`, `openGateItems`,
 `integrationBlockers`, and the guard bundle need no call-site changes. The
 guard bundle copies `lib/state.mjs` at install; the version stamp already
-reports `stale` after a plugin bump, and `guard install` refreshes it.
+reports `stale` after a plugin bump, and `guard install` refreshes it. The
+review CLI refuses a second record for the same reviewer, phase and cycle; a
+verdict changes only at the next cycle or by an overrule.
 
 ## 7. Failure modes
 

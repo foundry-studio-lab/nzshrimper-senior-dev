@@ -22,8 +22,11 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/state-cli.mjs" <subcommand> [flags]
 1. Run `node <plugin>/scripts/state-cli.mjs status` (the session bootstrap
    gives the exact path). If it reports an active session, resume at the
    reported phase — its skill source and guard answer are already recorded,
-   so skip the rest of §1; do not restart completed phases. If it prints a
-   `codex:` update line, offer `codex update` before the first Codex pass —
+   so skip the rest of §1; do not restart completed phases. On resume also
+   run `state-cli guard status`; if it prints `stale`, run `state-cli guard
+   install` (consent already given) so the hooks carry the current gate
+   logic. If it prints a `codex:` update line, offer `codex update` before
+   the first Codex pass —
    the review lanes use whatever CLI is on PATH.
 2. **Skill source (fresh run only, before classifying).** Decide which skills
    fill the process phases this run. Run `node <plugin>/scripts/state-cli.mjs
@@ -240,12 +243,20 @@ contract. A fresh subagent inherits nothing.
    - Record: `state-cli review --phase <phase> --reviewer claude --verdict <V> --cycle <n>`
 2. Codex pass (READ-ONLY, never `--write`):
    - Capture `git status --porcelain` and `git log -1 --format=%H` BEFORE.
-   - Read the effort: `state-cli models --phase <phase>` → `codex=<effort>`.
-   - Run `node <codex-plugin>/scripts/codex-companion.mjs task --fresh --effort <effort> "<prompt>"`
-     with the prompt built from `references/codex-review-prompt.md` (fill
-     the diff range and phase). It asks for the JSON verdict as the only
-     reply and tells Codex to check any repo document or policy the diff
-     touches.
+   - Read the effort: `state-cli models --phase review` for a per-phase pass,
+     `state-cli models --phase finish` for the final whole-branch pass →
+     `codex=<effort>`. (The lookup names the review's own tier row, not the
+     phase being reviewed, which has no Codex effort.)
+   - Locate the codex plugin's companion script:
+     `ls -d ~/.claude/plugins/cache/*/codex/*/scripts/codex-companion.mjs | tail -1`
+     (the codex plugin's own `${CLAUDE_PLUGIN_ROOT}` is not visible from here).
+     Not found → run `/codex:review` instead and record
+     `state-cli degrade --wanted "codex task --effort" --used "/codex:review" --reason "companion script not found"`.
+   - Run `node <that path> task --fresh --effort <effort> "<prompt>"` with the
+     prompt built from `references/codex-review-prompt.md` (fill the diff range
+     and phase). It asks for the JSON verdict as the only reply and tells Codex
+     to check any repo document or policy the diff touches.
+     `/codex:adversarial-review` stays available to the operator directly.
    - Reply isn't the exact JSON contract? Re-ask ONCE for JSON-only. Still
      not JSON → record `NEEDS_REVISION` and tell the operator.
    - Re-run the two git commands AFTER. Any difference = Codex wrote to the
@@ -266,8 +277,11 @@ contract. A fresh subagent inherits nothing.
      `{"concerns":[{"id":"<n>","decision":"uphold"|"overrule","reason":"<text>"}]}`
      Record the dispatch: `state-cli dispatch --phase adjudicate`.
    - Non-JSON reply → treat every concern as upheld and say so.
-   - Upheld concerns → the fix loop; re-review at cycle `n+1`.
-   - Overruled concerns → ask the operator ONE question listing each
+   - Any concern upheld → the fix loop for the upheld ones; re-review at
+     cycle `n+1`. Do NOT record an overrule for this cycle: an overrule is
+     reviewer-wide and would clear the upheld concerns too. Overruled
+     concerns simply need no fix.
+   - Every concern overruled → ask the operator ONE question listing each
      concern with the adjudicator's reason. On yes:
      `state-cli review --phase <phase> --reviewer <rejecting> --cycle <n> --overrule --reason "<operator's words>"`
      — the phase now counts as approved. On no → the fix loop.

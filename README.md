@@ -69,8 +69,10 @@ removes it, and confirms a clean tree before archiving the session:
   caught.
 - **Stop gate** — a session claiming "done" with open gate items gets the
   checklist back, once per distinct state (never loops).
-- **Codex phase reviews** — read-only `/codex:review` verdicts per phase, a JSON
-  verdict contract, a 3-cycle cap, and a post-review write-detection guard.
+- **Codex phase reviews** — read-only Codex passes through the codex plugin's
+  task lane at the phase's configured effort (`/codex:adversarial-review` stays
+  available), a JSON verdict contract, a 3-cycle cap, and a post-review
+  write-detection guard.
 - **Docs gate** — spec, plan, handover, affected docs.
 - **Hygiene sweep** — evidence-based zero-leftovers close.
 
@@ -114,16 +116,21 @@ controller. The conductor may raise a tier on a named complexity signal and
 records why; it never lowers. `status` reports the tiers a run used.
 
 ```json
-"models": {
-  "steps": { "review": { "claude": "sonnet", "codex": "medium" } },
-  "lanes": { "feature": { "finish": { "claude": "fable", "codex": "xhigh" } } }
+{
+  "version": 3,
+  "source": "superpowers",
+  "models": {
+    "steps": { "review": { "claude": "sonnet", "codex": "medium" } },
+    "lanes": { "feature": { "finish": { "claude": "fable", "codex": "xhigh" } } }
+  }
 }
 ```
 
 A split verdict (one reviewer approves, the other rejects) goes to an
-adjudicator one tier up with only the disputed concerns. Upheld concerns
-enter the fix loop. Overruled ones come to you as one yes or no; your yes
-is recorded and is the only thing that clears the block.
+adjudicator on the configured `adjudicate` tier (fable by default) with only
+the disputed concerns. Upheld concerns enter the fix loop. Overruled ones come
+to you as one yes or no; your yes is recorded and is the only thing that clears
+the block.
 
 ## Universal enforcement (the guard)
 
