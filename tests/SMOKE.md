@@ -23,7 +23,8 @@ Setup: `mkdir -p <scratch>/sd-smoke && cd <scratch>/sd-smoke && git init && git 
 8. [ ] /senior-dev:bypass testing the escape hatch -> next push allowed,
        bypass visible in /senior-dev:status.
 9. [ ] Codex absent/unauthed simulation (or real /codex:review) -> verdict
-       recorded via state-cli review; cycle 4 refused by CLI.
+       recorded via state-cli review; cycle 4 NEEDS_REVISION and any cycle
+       >= 5 refused by CLI; cycle 4 APPROVED accepted as the confirmation.
 10. [ ] /senior-dev:finish -> sweep evidence printed, state archived to
         .senior-dev/history/, /senior-dev:status -> "no active session".
 11. [ ] Delete throwaway repo. Zero leftovers on the machine.

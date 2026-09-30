@@ -159,69 +159,80 @@ async function main() {
     if (!isIntegration && !isCommit) process.exit(0);
 
     const cwd = data.cwd || process.cwd();
-    // The session belongs to the repo the command targets: a resolved `-C`
-    // dir inside a repo wins over cwd's repo (`git -C /repo/B push` from A
-    // is B's action); otherwise cwd's repo.
-    let repoRoot = null;
+    const cwdRoot = findRepoRoot(cwd);
+    // Each segment is judged by the repo it targets: a resolved `-C` dir
+    // inside a repo is that repo's action (`git -C /repo/B push` from A is
+    // B's), anything else is cwd's repo. Commits stay on cwd's repo. One
+    // group per repo, each with its own state and tests config.
+    const groups = new Map();
+    const group = (root) => {
+      if (!groups.has(root)) groups.set(root, { root, integrations: [], commit: false });
+      return groups.get(root);
+    };
     for (const x of integrations) {
-      if (repoRoot) break;
-      if (x.dir && x.dir !== UNRESOLVED) repoRoot = findRepoRoot(resolve(cwd, x.dir));
+      const root = (x.dir && x.dir !== UNRESOLVED && findRepoRoot(resolve(cwd, x.dir))) || cwdRoot;
+      if (root) group(root).integrations.push(x);
     }
-    repoRoot = repoRoot || findRepoRoot(cwd);
-    if (!repoRoot) process.exit(0);
-    const state = readState(repoRoot);
-    if (!hasActiveSession(state)) process.exit(0);
+    if (isCommit && cwdRoot) group(cwdRoot).commit = true;
+    const many = groups.size > 1;
 
-    // Compute the decision BEFORE touching any armed bypass: an action that
-    // was never going to be blocked must not spend the operator's one-shot
-    // bypass token.
-    let blockMsg = null;
-
-    if (isIntegration) {
-      // Coverage (§3.3 rule 3) only where code ships: push and gh pr create,
-      // checked against the target checkout's HEAD (a `-C` dir, else cwd).
-      // A merge's tree does not exist yet, so merges get rules 1-2 only.
-      const shipping = integrations.filter((x) => x.kind === 'push' || x.kind === 'pr-create');
-      const targets = shipping.map((x) => resolve(cwd, x.dir ?? '.'));
-      const blockers = integrationBlockers(state, {
-        tests: readSkillsConfig(repoRoot)?.tests,
-        trees: shipping.length ? targets.map((d) => headTree(d)) : undefined,
-        heads: targets.map((d) => headCommit(d)),
-      });
-      if (blockers.length) {
-        blockMsg = `integration blocked (${blockers.length} item${blockers.length > 1 ? 's' : ''}):\n- ${blockers.join('\n- ')}`;
+    // Compute every decision BEFORE touching any armed bypass: an action
+    // that was never going to be blocked must not spend the operator's
+    // one-shot bypass token.
+    const gated = [];
+    for (const g of groups.values()) {
+      g.state = readState(g.root);
+      if (!hasActiveSession(g.state)) continue; // no session: ungated
+      gated.push(g);
+      g.blockMsg = null;
+      if (g.integrations.length) {
+        // Coverage (§3.3 rule 3) only where code ships: push and gh pr
+        // create, checked against the target checkout's HEAD (a `-C` dir,
+        // else cwd). A merge's tree does not exist yet: rules 1-2 only.
+        const shipping = g.integrations.filter((x) => x.kind === 'push' || x.kind === 'pr-create');
+        const targets = shipping.map((x) => resolve(cwd, x.dir ?? '.'));
+        const blockers = integrationBlockers(g.state, {
+          tests: readSkillsConfig(g.root)?.tests,
+          trees: shipping.length ? targets.map((d) => headTree(d)) : undefined,
+          heads: targets.map((d) => headCommit(d)),
+        });
+        if (blockers.length) {
+          g.blockMsg = `integration blocked (${blockers.length} item${blockers.length > 1 ? 's' : ''}):\n- ${blockers.join('\n- ')}`;
+        }
       }
-    }
-
-    if (!blockMsg && isCommit) {
-      const cur = currentPhase(state);
-      if (cur && TEST_GATED_PHASES.has(cur) && !state.phases?.[cur]?.testsGreenAt) {
-        blockMsg = `commit blocked: phase '${cur}' has no green test run recorded. Run the tests, then: node "$CLAUDE_PLUGIN_ROOT/scripts/state-cli.mjs" tests-green (conductor skill shows the exact call).`;
+      if (!g.blockMsg && g.commit) {
+        const cur = currentPhase(g.state);
+        if (cur && TEST_GATED_PHASES.has(cur) && !g.state.phases?.[cur]?.testsGreenAt) {
+          g.blockMsg = `commit blocked: phase '${cur}' has no green test run recorded. Run the tests, then: node "$CLAUDE_PLUGIN_ROOT/scripts/state-cli.mjs" tests-green (conductor skill shows the exact call).`;
+        }
       }
+      if (g.blockMsg && many) g.blockMsg = `${g.root}: ${g.blockMsg}`;
     }
 
-    // A consumed bypass allows the action but must still fall through to the
-    // token write below - the guard's fresh evaluation would re-find the same
-    // blockers, and the spent bypass cannot cover them twice.
-    const bypassed = !!blockMsg && !!consumeBypass(repoRoot, state, command.slice(0, 120));
-    if (blockMsg && !bypassed) block(blockMsg);
+    // Each blocking repo needs its OWN armed bypass (one armed in A never
+    // waives B). Spend none unless all are armed, so a still-blocked action
+    // costs nobody their token. A consumed bypass allows the action but
+    // still falls through to the token write below - the guard's fresh
+    // evaluation would re-find the same blockers.
+    const blocking = gated.filter((g) => g.blockMsg);
+    if (blocking.some((g) => !g.state.bypassArmed)) block(blocking.map((g) => g.blockMsg).join('\n'));
+    for (const g of blocking) g.bypassed = !!consumeBypass(g.root, g.state, command.slice(0, 120));
 
-    // Allowed. If this was a gated action (integration or commit) and the
-    // universal guard is installed, leave a single-use pass token so the
-    // git hook does not re-evaluate (and cannot double-consume a bypass).
-    // pre-push still checks test coverage of the pushed shas unless the
-    // token says a bypass was consumed (`bypassed`).
-    // Best-effort. A command that is somehow both (`git commit && git push`)
+    // Allowed. In each gated repo with the universal guard installed, leave
+    // a single-use pass token so the git hook does not re-evaluate (and
+    // cannot double-consume a bypass). pre-push still checks test coverage
+    // of the pushed shas unless the token says a bypass was consumed.
+    // Best-effort. A group that is somehow both (`git commit && git push`)
     // gets the 'integration' token - it is the stricter, later-firing hook.
-    if (isIntegration || isCommit) {
+    for (const g of gated) {
       try {
-        if (readSkillsConfig(repoRoot)?.guard === 'installed') {
-          const dir = join(repoRoot, '.senior-dev', 'guard');
+        if (readSkillsConfig(g.root)?.guard === 'installed') {
+          const dir = join(g.root, '.senior-dev', 'guard');
           mkdirSync(dir, { recursive: true });
           writeFileSync(join(dir, 'pass.json'), JSON.stringify({
-            type: isIntegration ? 'integration' : 'commit',
+            type: g.integrations.length ? 'integration' : 'commit',
             commandHash: createHash('sha256').update(command).digest('hex'),
-            bypassed,
+            bypassed: !!g.bypassed,
             expiresAt: new Date(Date.now() + 60_000).toISOString(),
           }));
         }

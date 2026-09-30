@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, readFileSync, mkdirSync, chmodSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, mkdirSync, chmodSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, basename } from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -403,4 +403,80 @@ test('C4: from repo A (with session), git -C B push evaluates B, not A', () => {
   writeState(b, clearState());
   assert.equal(gateAt(a, 'git push').status, 0);
   assert.equal(gateAt(a, `git -C ${b} push`).status, 2);
+});
+
+// ---- multi-repo commands: each repo's segments are judged by that repo ----
+// A repo with a tests config; `session` is 'clean' (green full run at HEAD),
+// 'blocked' (no full run) or null (no session).
+function mrRepo(prefix, session, { guard = false, ...extra } = {}) {
+  const d = realpathSync(makeRepo(prefix)); // the gate names repos by git's realpath
+  writeFileSync(join(d, 'own.txt'), d); // a tree no other repo shares
+  git(d, 'add', 'own.txt');
+  git(d, 'commit', '-qm', 'own');
+  if (guard) execFileSync('node', [CLI, 'guard', 'install'], { cwd: d, env: { ...process.env, SENIOR_DEV_OFFLINE: '1' } });
+  writeSkillsConfig(d, { ...(readSkillsConfig(d) || { source: 'superpowers', shared: false }), version: 4, tests: TESTS });
+  if (session) writeState(d, clearState({ ...(session === 'clean' ? { testRuns: [full(1, { tree: headTree(d) })] } : {}), ...extra }));
+  return d;
+}
+const NO_FULL = 'no full test run recorded';
+const readJson = (p) => JSON.parse(readFileSync(p, 'utf8'));
+
+test('multi-repo (a): git -C B push && git -C A push, B no session, A blocked: blocked on A', () => {
+  const a = mrRepo('sd-mr-a1-', 'blocked');
+  const b = mrRepo('sd-mr-b1-', null);
+  const r = gateAt(a, `git -C ${b} push && git -C ${a} push`);
+  assert.equal(r.status, 2, r.out);
+  assert.ok(r.out.includes(`${a}: integration blocked`), r.out);
+  assert.ok(r.out.includes(NO_FULL), r.out);
+});
+
+test('multi-repo (b): from A, git push && git -C B push, B no session: blocked on A', () => {
+  const a = mrRepo('sd-mr-a2-', 'blocked');
+  const b = mrRepo('sd-mr-b2-', null);
+  const r = gateAt(a, `git push && git -C ${b} push`);
+  assert.equal(r.status, 2, r.out);
+  assert.ok(r.out.includes(`${a}: integration blocked`), r.out);
+});
+
+test('multi-repo (c): A clean, B blocked: blocked, names B only', () => {
+  const a = mrRepo('sd-mr-a3-', 'clean');
+  const b = mrRepo('sd-mr-b3-', 'blocked');
+  const r = gateAt(a, `git push && git -C ${b} push`);
+  assert.equal(r.status, 2, r.out);
+  assert.ok(r.out.includes(`${b}: integration blocked`), r.out);
+  assert.ok(!r.out.includes(a), r.out);
+});
+
+test('multi-repo (d): A and B clean: allowed, a pass token in each guarded repo', () => {
+  const a = mrRepo('sd-mr-a4-', 'clean', { guard: true });
+  const b = mrRepo('sd-mr-b4-', 'clean', { guard: true });
+  const r = gateAt(a, `git push && git -C ${b} push`);
+  assert.equal(r.status, 0, r.out);
+  for (const d of [a, b]) {
+    const tok = readJson(join(d, '.senior-dev', 'guard', 'pass.json'));
+    assert.equal(tok.type, 'integration');
+    assert.equal(tok.bypassed, false);
+  }
+});
+
+test('multi-repo (e): a bypass armed in A never waives B', () => {
+  const BYP = { bypassArmed: { reason: 'r', at: 'x' } };
+  // A clean with a bypass, B blocked: blocked, A's bypass kept.
+  const a = mrRepo('sd-mr-a5-', 'clean', BYP);
+  const b = mrRepo('sd-mr-b5-', 'blocked');
+  const r = gateAt(a, `git -C ${a} push && git -C ${b} push`);
+  assert.equal(r.status, 2, r.out);
+  assert.ok(r.out.includes(`${b}: integration blocked`), r.out);
+  assert.ok(readJson(join(a, '.senior-dev', 'state.json')).bypassArmed);
+  // A blocked with a bypass, B blocked without: still blocked, A's bypass not spent.
+  const a2 = mrRepo('sd-mr-a6-', 'blocked', BYP);
+  const b2 = mrRepo('sd-mr-b6-', 'blocked');
+  assert.equal(gateAt(a2, `git push && git -C ${b2} push`).status, 2);
+  assert.ok(readJson(join(a2, '.senior-dev', 'state.json')).bypassArmed);
+  // Both blocked, both armed: each repo spends its own bypass, action allowed.
+  const a3 = mrRepo('sd-mr-a7-', 'blocked', { ...BYP, guard: true });
+  const b3 = mrRepo('sd-mr-b7-', 'blocked', BYP);
+  assert.equal(gateAt(a3, `git push && git -C ${b3} push`).status, 0);
+  for (const d of [a3, b3]) assert.equal(readJson(join(d, '.senior-dev', 'state.json')).bypassArmed, undefined);
+  assert.equal(readJson(join(a3, '.senior-dev', 'guard', 'pass.json')).bypassed, true);
 });

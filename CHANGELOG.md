@@ -27,6 +27,10 @@ clustering in five places; each is now a first-class, logged operation.
   <repo> push` finds that repo's session (the `-C` target wins over cwd's
   repo). This fix applies to repos without a tests config too: it only blocks
   more (such commands used to slip past the review, verify and docs gates).
+- A command touching several repos (`git push && git -C /repo/B push`) is
+  judged per repo: each repo's pushes against its own session, tests config
+  and bypass, blocked if any repo blocks, with each blocking repo named. A
+  bypass armed in one repo never waives another.
 - `set-tests` warns when `--report` points inside the repo at a path that is
   not git-ignored.
 - `test --preexisting <id>` proves a failure also fails on the session's base
