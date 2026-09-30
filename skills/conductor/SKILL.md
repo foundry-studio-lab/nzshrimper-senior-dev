@@ -204,7 +204,12 @@ path the moment the phase's deliverable exists.
      it fails on the base commit too. Proven, and the operator wants to
      proceed: they run `/senior-dev:ship <reason>` (operator-only); after
      that stop chasing pre-existing failures. Not proven means your change
-     caused it - fix it.
+     caused it - fix it. Refused as `ambiguous id` or `different test`: the
+     id names more than one test - give those tests unique names. A proof
+     counts only for the full run it was made against, so after another red
+     full run, re-prove its failures. `passed no tests` means the full
+     command didn't run the suite (with `node --test`, pass a glob such as
+     `'test/*.test.mjs'`, not a directory) - fix the command.
    - If a run prints `CONTRADICTION: ...` STOP fixing. Show the operator both
      tests, ask which behaviour is right, and record the answer with
      `state-cli test --resolve <id> --reason "<answer>"`.

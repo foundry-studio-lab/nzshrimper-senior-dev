@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.4.0 — 2026-09-30
+## 0.4.0 — 2026-10-01
 
 Friction pass. An audit of 441 archived sessions found the bypasses
 clustering in five places; each is now a first-class, logged operation.
@@ -51,7 +51,10 @@ clustering in five places; each is now a first-class, logged operation.
   current lane has; lowering, or dropping gate items (refactor to bug-fix
   drops spec, plan), needs `--by-operator`. `init` records `baseHead`/`baseRefs`.
 - Review cycle 4 records only a confirming APPROVED. `finish --no-change
-  "<reason>"` closes a session that changed nothing, after the CLI checks it.
+  "<reason>"` closes a session that changed nothing, after the CLI checks
+  HEAD, branches, tags, the stash, the working tree and worktrees against the
+  baseline taken at `init`.
+- `state-cli review --skill <name>` records which Claude review skill ran.
 - The conductor names only skills that exist: `superpowers:verification-before-completion`
   for verify, `superpowers:requesting-code-review` for the Claude pass
   (`/code-review` only when that exact skill is listed), and checks phase

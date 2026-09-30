@@ -142,7 +142,7 @@ investigation):
 "tests": {
   "full":    "npm test -- --reporter=junit --outputFile=.senior-dev/junit.xml",
   "related": "npx vitest related --run {files}",
-  "one":     "npx vitest run {test} --reporter=junit --outputFile=.senior-dev/junit.xml",
+  "one":     "npx vitest run {file} -t {name} --reporter=junit --outputFile=.senior-dev/junit.xml",
   "report":  ".senior-dev/junit.xml",
   "setup":   "ln -s \"$SENIOR_DEV_MAIN/node_modules\" node_modules",
   "build":   "npm run build"
@@ -154,6 +154,11 @@ covered. The gate wants one green full run; after that, later changes need
 only their affected tests, checked at push / PR creation. A failure outside
 your diff can be proven pre-existing (`test --preexisting <id>`, needs `one`
 and `report`), and then the operator can `/senior-dev:ship <reason>` past it.
+A test id is `classname > name`; `{file}` and `{name}` are its two halves.
+The proof is strict: it refuses an id shared by two tests, a failure from a
+different file on base, and a full run that passed no tests (a command that
+never ran the suite - with `node --test`, pass a glob, not a directory), and
+a proof counts only for the full run it was made against.
 A test that fails, passes and fails again stops the loop with `CONTRADICTION`
 until the operator says which behaviour is right. Declining the runner
 (`set-tests --none`) keeps the 0.3.1 `tests-green` behaviour. Known ceilings

@@ -75,3 +75,12 @@ Setup: `mkdir -p <scratch>/sd-smoke && cd <scratch>/sd-smoke && git init && git 
 27. [ ] `finish --no-change "<reason>"` on an untouched session -> archived
         with outcome no-change; after a commit -> refused. Cycle 4 accepts
         only `--verdict APPROVED`.
+28. [x] Test runner + ship with node's own runner (`node --test
+        --test-reporter=junit --test-reporter-destination=report.xml
+        'test/*.test.mjs'`), passed 14/14 on 2026-10-01 in scratch repos:
+        pre-existing failure proven and shipped; diff-caused failure refused;
+        same-named tests in two files refused as ambiguous; a narrowed `one`
+        command still refused at ship (repeated failing ids); a test deleted
+        on base and re-added in another file refused as a different test; a
+        directory instead of a glob (`test/`) refused as "passed no tests".
+        Re-run after any change to the proof, `parseJUnit` or `testBlockers`.
