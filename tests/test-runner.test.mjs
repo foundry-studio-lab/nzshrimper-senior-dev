@@ -125,6 +125,7 @@ test('--full records failures from the report; red run exits 1 and sets no tests
   const run = s.testRuns[0];
   assert.equal(run.id, 1); assert.equal(run.kind, 'full'); assert.equal(run.exit, 1);
   assert.deepEqual(run.failures, ['s > bad']);
+  assert.equal(run.passedCount, 1);
   assert.equal(run.phase, 'implement'); assert.equal(run.sinceFull, null);
   assert.equal(run.head, g(t.dir, 'rev-parse', 'HEAD'));
   assert.equal(run.tree, g(t.dir, 'rev-parse', 'HEAD^{tree}'));

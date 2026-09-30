@@ -58,6 +58,24 @@ process.exit(Number(readFileSync('exit', 'utf8')));
 const lastRun = (dir) => readState(dir).testRuns.at(-1);
 const worktrees = (dir) => g(dir, 'worktree', 'list', '--porcelain').split('\n').filter((l) => l.startsWith('worktree '));
 
+test('an id shared by two testcases in the HEAD report is never proven (ambiguous)', () => {
+  // Two different tests reporting the same id (node's reporter uses classname
+  // "test" for every file): a base failure of one must not prove the other.
+  const s = setup({ base: { report: xml([failing('X')]), exit: 1 }, head: { report: xml([failing('X'), failing('X')]), exit: 1 } });
+  const r = cli(s.dir, ['test', '--preexisting', ID]);
+  assert.equal(r.status, 1, r.out);
+  assert.equal(lastRun(s.dir).proven, false);
+  assert.match(lastRun(s.dir).reason, /^ambiguous id: 2 testcases in the HEAD report share it/);
+});
+
+test('an id shared by two testcases in the base report is never proven (ambiguous)', () => {
+  const s = setup({ base: { report: xml([failing('X'), pass('X')]), exit: 1 }, head: { report: xml([failing('X')]), exit: 1 } });
+  const r = cli(s.dir, ['test', '--preexisting', ID]);
+  assert.equal(r.status, 1, r.out);
+  assert.equal(lastRun(s.dir).proven, false);
+  assert.match(lastRun(s.dir).reason, /^ambiguous id: 2 testcases in the base report share it/);
+});
+
 test('fails on base and HEAD -> proven', () => {
   const s = setup({ base: { report: xml([failing('X')]), exit: 1 }, head: { report: xml([failing('X'), pass('Y')]), exit: 1 } });
   const r = cli(s.dir, ['test', '--preexisting', ID]);

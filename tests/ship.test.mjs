@@ -83,6 +83,17 @@ test('refuses naming every unproven failure', () => {
   assert.equal(readState(dir).ship, undefined);
 });
 
+test('refuses when the full run passed no tests (runner may not have run the suite)', () => {
+  // A misconfigured runner reports one synthetic failure and nothing else; it
+  // reproduces on base, so it "proves" itself while no real test ran.
+  const { dir, tree, set } = setup();
+  set([{ ...red(1, tree), passedCount: 0 }, pre(2, 'a > x', tree)]);
+  const r = ship(dir);
+  assert.equal(r.status, 1);
+  assert.match(r.out, /full test run #1 passed no tests/);
+  assert.equal(readState(dir).ship, undefined);
+});
+
 test('refuses when the current HEAD tree is not covered', () => {
   const { dir, set } = setup();
   set([red(1, 'other-tree'), pre(2, 'a > x', 'other-tree')]);

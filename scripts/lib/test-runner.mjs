@@ -160,7 +160,7 @@ export function runTest({ repoRoot, cwd, state, cfg, kind, files, test }) {
   const at = new Date().toISOString();
   const run = {
     ...runBase(state), kind: cmdKind, cmd, files: runFiles, test: test ?? null, exit,
-    failures: parsed ? parsed.failed : null, head, tree, phase, at,
+    failures: parsed ? parsed.failed : null, passedCount: parsed ? parsed.passed.length : null, head, tree, phase, at,
   };
   state.testRuns.push(run);
   if (exit === 0 && kind !== 'build') state.phases[phase] = { ...(state.phases[phase] || { status: 'in_progress' }), testsGreenAt: at };
@@ -230,11 +230,16 @@ export function provePreexisting({ cwd, state, cfg, test }) {
   const onHead = exec(cmd, cwd, headReport);
 
   const where = (p, id) => (!p ? 'no parseable report' : p.failed.includes(id) ? 'failed' : p.passed.includes(id) ? 'passed' : 'test not in report');
+  // Two testcases sharing an id (node's reporter gives every file classname
+  // "test") could let one test's base failure prove another's: never prove.
+  const count = (p, id) => (p ? [...p.failed, ...p.passed].filter((x) => x === id).length : 0);
+  const shared = [['HEAD', onHead.parsed], ['base', onBase.parsed]].find(([, p]) => count(p, test) > 1);
   const h = where(onHead.parsed, test);
   const b = where(onBase.parsed, test);
   let proven = false;
   let reason;
-  if (h === 'passed') reason = 'passes on HEAD - nothing to prove';
+  if (shared) reason = `ambiguous id: ${count(shared[1], test)} testcases in the ${shared[0]} report share it - make test names unique or narrow the 'one' command`;
+  else if (h === 'passed') reason = 'passes on HEAD - nothing to prove';
   else if (h !== 'failed') reason = `absent from the HEAD report: ${h} (exit ${onHead.exit})`;
   else if (b === 'failed') { proven = true; reason = `fails on base ${sha7} and HEAD`; }
   else if (b === 'passed') reason = `caused by this change: passes on base ${sha7}`;

@@ -302,6 +302,11 @@ export function testBlockers(state, ctx = {}) {
     if (!Array.isArray(F.failures) || F.failures.length === 0) {
       return [`full test run #${F.id} failed and its failures are unknown (no JUnit report)`];
     }
+    // A red run with no passing test is a runner that did not run the suite
+    // (its one synthetic failure reproduces on base and would prove itself).
+    if (F.passedCount === 0) {
+      return [`full test run #${F.id} passed no tests - the runner may not have run the suite; fix the full command, then state-cli test --full`];
+    }
     const proven = new Set(runs.filter((r) => r.kind === 'preexisting' && r.proven === true).map((r) => r.test));
     const unproven = F.failures.filter((t) => !proven.has(t));
     if (unproven.length) {
