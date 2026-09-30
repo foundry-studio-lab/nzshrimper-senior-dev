@@ -202,7 +202,7 @@ switch (cmd) {
       baseHead = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repoRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
     } catch { /* no commits yet */ }
     try {
-      const refs = execFileSync('git', ['for-each-ref', '--format=%(refname) %(objectname)', 'refs/heads'], { cwd: repoRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+      const refs = execFileSync('git', ['for-each-ref', '--format=%(refname) %(objectname)', 'refs/heads', 'refs/tags', 'refs/stash'], { cwd: repoRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
       for (const line of refs.split('\n')) {
         const [name, sha] = line.trim().split(' ');
         if (name && sha) baseRefs[name] = sha;
@@ -621,18 +621,21 @@ switch (cmd) {
       if (typeof reason !== 'string' || !reason.trim()) fail('finish --no-change needs a non-empty reason');
       if (flags['force-open'] !== undefined) fail('finish --no-change cannot be combined with --force-open');
       if (typeof state.baseHead !== 'string') fail('finish --no-change needs a session recorded by 0.4+ with a base commit - use finish or finish --force-open');
-      const g = (...a) => execFileSync('git', a, { cwd: repoRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+      const g = (...a) => {
+        try { return execFileSync('git', a, { cwd: repoRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }); }
+        catch (e) { return fail(`finish --no-change refused - git ${a[0]} failed: ${e.message.split('\n')[0]}`); }
+      };
       const head = g('rev-parse', 'HEAD').trim();
       if (head !== state.baseHead) fail(`finish --no-change refused - HEAD moved: ${state.baseHead.slice(0, 7)} -> ${head.slice(0, 7)}`);
       const now = {};
-      for (const line of g('for-each-ref', '--format=%(refname) %(objectname)', 'refs/heads').split('\n')) {
+      for (const line of g('for-each-ref', '--format=%(refname) %(objectname)', 'refs/heads', 'refs/tags', 'refs/stash').split('\n')) {
         const [name, sha] = line.trim().split(' ');
         if (name) now[name] = sha;
       }
       const base = state.baseRefs || {};
       for (const name of new Set([...Object.keys(base), ...Object.keys(now)])) {
         if (base[name] !== undefined ? base[name] !== now[name] : now[name] !== state.baseHead) {
-          fail(`finish --no-change refused - branch ${name.replace(/^refs\/heads\//, '')} changed`);
+          fail(`finish --no-change refused - ${name.startsWith('refs/heads/') ? `branch ${name.slice(11)}` : `ref ${name}`} changed`);
         }
       }
       if (g('status', '--porcelain').trim()) fail('finish --no-change refused - working tree not clean');

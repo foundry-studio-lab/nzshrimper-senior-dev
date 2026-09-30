@@ -88,6 +88,35 @@ test('no-change refused for a new branch with a commit', () => {
   refuse(repo, 'branch feat changed');
 });
 
+const dirtyStash = (repo) => { writeFileSync(join(repo, 'a.txt'), 'wip'); git(repo, 'stash', 'push', '-q'); };
+
+test('no-change refused when a stash was created during the session', () => {
+  const repo = fresh();
+  dirtyStash(repo);
+  refuse(repo, 'ref refs/stash changed');
+});
+
+test('a stash present before init and untouched does not block no-change', () => {
+  const repo = makeRepo();
+  dirtyStash(repo);
+  cli(repo, ['init', '--task', 'nothing', '--type', 'quick-fix']);
+  assert.equal(cli(repo, NC).status, 0);
+});
+
+test('no-change refused for a new tag on an older non-base commit', () => {
+  const repo = makeRepo();
+  git(repo, 'commit', '-q', '--allow-empty', '-m', 'second');
+  cli(repo, ['init', '--task', 'nothing', '--type', 'quick-fix']);
+  git(repo, 'tag', 'old', 'HEAD~1');
+  refuse(repo, 'ref refs/tags/old changed');
+});
+
+test('a new tag at baseHead is accepted', () => {
+  const repo = fresh();
+  git(repo, 'tag', 'v1');
+  assert.equal(cli(repo, NC).status, 0);
+});
+
 test('no-change refused for a dirty working tree', () => {
   const repo = fresh();
   writeFileSync(join(repo, 'a.txt'), 'changed');
