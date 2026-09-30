@@ -159,12 +159,15 @@ async function main() {
     if (!isIntegration && !isCommit) process.exit(0);
 
     const cwd = data.cwd || process.cwd();
-    // cwd outside any repo: `git -C /repo push` still targets /repo's session.
-    let repoRoot = findRepoRoot(cwd);
+    // The session belongs to the repo the command targets: a resolved `-C`
+    // dir inside a repo wins over cwd's repo (`git -C /repo/B push` from A
+    // is B's action); otherwise cwd's repo.
+    let repoRoot = null;
     for (const x of integrations) {
       if (repoRoot) break;
       if (x.dir && x.dir !== UNRESOLVED) repoRoot = findRepoRoot(resolve(cwd, x.dir));
     }
+    repoRoot = repoRoot || findRepoRoot(cwd);
     if (!repoRoot) process.exit(0);
     const state = readState(repoRoot);
     if (!hasActiveSession(state)) process.exit(0);

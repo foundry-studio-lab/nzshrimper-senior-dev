@@ -384,3 +384,23 @@ test('F3: no tests config: finish unchanged', () => {
   assert.ok(st.includes('open gate items (1):\n  - phase:finish'), st);
   assert.equal(cliAt(main, ['finish']).status, 0);
 });
+
+test('C4: from repo A (no session), git -C B push is gated by B\'s session', () => {
+  const a = makeRepo('sd-itg-c4a-');
+  const b = makeRepo('sd-itg-c4b-');
+  writeSkillsConfig(b, { version: 4, source: 'superpowers', shared: false, tests: TESTS });
+  writeState(b, clearState());
+  const r = gateAt(a, `git -C ${b} push`);
+  assert.equal(r.status, 2);
+  assert.ok(r.out.includes('no full test run recorded'));
+});
+
+test('C4: from repo A (with session), git -C B push evaluates B, not A', () => {
+  const a = makeRepo('sd-itg-c4c-');
+  const b = makeRepo('sd-itg-c4d-');
+  for (const d of [a, b]) writeSkillsConfig(d, { version: 4, source: 'superpowers', shared: false, tests: TESTS });
+  writeState(a, clearState({ testRuns: [full(1, { tree: headTree(a) })] }));
+  writeState(b, clearState());
+  assert.equal(gateAt(a, 'git push').status, 0);
+  assert.equal(gateAt(a, `git -C ${b} push`).status, 2);
+});
