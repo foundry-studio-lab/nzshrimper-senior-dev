@@ -6,7 +6,7 @@ import {
   existsSync, mkdirSync, renameSync, readFileSync, writeFileSync,
   copyFileSync, chmodSync, unlinkSync,
 } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { join, dirname, relative, resolve, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   CHAINS, DOCS_GATE, LANE_RANK, isLane, findRepoRoot, readState, writeState, statePath,
@@ -185,7 +185,7 @@ function openItems(repoRoot, state) {
   let head = null;
   try { head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repoRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch { /* no commits */ }
   const trees = head !== (state.baseHead ?? null) ? [headTree(repoRoot)] : undefined;
-  return [...items, ...testBlockers(state, { tests, trees }).map((b) => `tests: ${b}`)];
+  return [...items, ...testBlockers(state, { tests, trees, heads: [head] }).map((b) => `tests: ${b}`)];
 }
 
 function git(repoRoot, args) {
@@ -918,6 +918,11 @@ switch (cmd) {
       writeSkillsConfig(repoRoot, cfg);
       ensureExcluded(repoRoot);
       console.log(`tests config: ${JSON.stringify(tests)}`);
+      const rel = tests.report ? relative(repoRoot, resolve(repoRoot, tests.report)) : '';
+      if (rel && rel !== '.senior-dev/junit.xml' && !rel.startsWith('..') && !isAbsolute(rel)) {
+        try { execFileSync('git', ['check-ignore', '-q', rel], { cwd: repoRoot, stdio: 'ignore' }); }
+        catch { console.error(`senior-dev: report path ${tests.report} is not git-ignored - add it to .gitignore so it is never committed`); }
+      }
       break;
     }
     fail('skills-config needs a subcommand: show | set | share | unshare | set-lane | resolve | models | set-models | set-tests');
@@ -942,5 +947,5 @@ switch (cmd) {
     break;
   }
   default:
-    fail(`unknown subcommand '${cmd || ''}'. Use: init|phase|tests-green|test|review|models|dispatch|docs|degrade|bypass|waiting|scratch|skills-config|skill-source|guard|status|sweep|finish`);
+    fail(`unknown subcommand '${cmd || ''}'. Use: init|phase|tests-green|test|review|models|dispatch|docs|degrade|bypass|ship|waiting|reclassify|scratch|skills-config|skill-source|guard|status|sweep|finish`);
 }

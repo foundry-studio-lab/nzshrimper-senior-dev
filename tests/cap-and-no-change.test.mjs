@@ -155,3 +155,10 @@ test('skills-config resolve --lane constructor is a clean refusal, not a crash',
     assert.ok(!/TypeError|\n\s+at /.test(r.out), r.out);
   }
 });
+
+test('M4: unknown-subcommand usage lists test, ship and reclassify', () => {
+  const r = cli(makeRepo(), ['nope']);
+  assert.equal(r.status, 1);
+  const use = r.out.slice(r.out.indexOf('Use: '));
+  for (const s of ['|test|', '|ship|', '|reclassify|']) assert.ok(use.includes(s), use);
+});

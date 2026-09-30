@@ -313,7 +313,27 @@ export function testBlockers(state, ctx = {}) {
   if (!Array.isArray(trees)) return [];
   const covered = (tree) => tree != null && (F.tree === tree || runs.some((r) => r.kind === 'affected'
     && r.exit === 0 && r.sinceFull === F.id && r.tree === tree));
-  return trees.length && trees.every(covered) ? [] : [`current tree is not covered by a green test run since full run #${F.id} (state-cli test --affected)`];
+  if (trees.length && trees.every(covered)) return [];
+  const out = [`current tree is not covered by a green test run since full run #${F.id} (state-cli test --affected)`];
+  // ctx.heads[i] is the commit of trees[i]. The latest run at that commit
+  // but another tree means the run saw uncommitted changes.
+  const R = runs.filter((r) => r.kind === 'full' || r.kind === 'affected').reduce((m, r) => (!m || r.id > m.id ? r : m), null);
+  const heads = Array.isArray(ctx.heads) ? ctx.heads : [];
+  if (R?.head && trees.some((t, i) => !covered(t) && heads[i] === R.head && R.tree !== t)) {
+    out.push('working tree has changes not in HEAD: commit or remove them, then state-cli test --affected');
+  }
+  return out;
+}
+
+// The commit sha of `rev` in the checkout at cwd; null on any git failure.
+export function headCommit(cwd, rev = 'HEAD') {
+  try {
+    return execFileSync('git', ['rev-parse', '--verify', '-q', `${rev}^{commit}`], {
+      cwd, stdio: ['ignore', 'pipe', 'ignore'],
+    }).toString().trim() || null;
+  } catch {
+    return null;
+  }
 }
 
 export function integrationBlockers(state, ctx = {}) {

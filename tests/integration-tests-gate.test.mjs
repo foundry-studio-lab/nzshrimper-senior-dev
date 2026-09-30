@@ -76,6 +76,17 @@ test('green full at the current tree: no test blocker', () => {
   assert.deepEqual(integrationBlockers(clearState({ testRuns: [full(1)] }), ctx), []);
 });
 
+const HINT = 'working tree has changes not in HEAD: commit or remove them, then state-cli test --affected';
+test('M1: uncovered tree at the latest run\'s HEAD gets the working-tree hint', () => {
+  const nc = 'current tree is not covered by a green test run since full run #1 (state-cli test --affected)';
+  const s = clearState({ testRuns: [full(1, { tree: 'dirty', head: 'H' })] });
+  assert.deepEqual(integrationBlockers(s, { tests: TESTS, trees: [T], heads: ['H'] }), [nc, HINT]);
+  assert.deepEqual(integrationBlockers(s, { tests: TESTS, trees: [T], heads: ['other'] }), [nc]);
+  assert.deepEqual(integrationBlockers(s, { tests: TESTS, trees: [T] }), [nc]);
+  s.testRuns.push(aff(2, { tree: 'dirty2', head: 'H2', exit: 1 }));
+  assert.deepEqual(integrationBlockers(s, { tests: TESTS, trees: [T], heads: ['H2'] }), [nc, HINT]);
+});
+
 test('tree not covered', () => {
   const s = clearState({ testRuns: [full(1, { tree: 'old' })] });
   assert.deepEqual(integrationBlockers(s, ctx),
@@ -182,6 +193,19 @@ function gateAt(cwd, command) {
   return { status: r.status, out: r.stderr || '' };
 }
 const NOT_COVERED = 'current tree is not covered by a green test run since full run #1';
+
+test('M1: commit-gate and finish show the hint for a run at HEAD with uncommitted changes', () => {
+  const { main, wt } = repoWithWorktree('sd-itg-hint-');
+  const wtHead = git(wt, 'rev-parse', 'HEAD');
+  writeState(main, clearState({ testRuns: [full(1, { tree: 'dirty', head: wtHead })] }));
+  const r = gateAt(wt, 'git push origin feat');
+  assert.equal(r.status, 2);
+  assert.ok(r.out.includes(`- ${HINT}`), r.out);
+  git(main, 'merge', '-q', '--ff-only', 'feat');
+  const f = spawnSync('node', [CLI, 'finish'], { cwd: main, encoding: 'utf8', env: { ...process.env, SENIOR_DEV_OFFLINE: '1' } });
+  assert.equal(f.status, 1);
+  assert.ok(f.stderr.includes(`tests: ${HINT}`), f.stderr);
+});
 
 test('commit-gate push from a linked worktree checks the worktree tree', () => {
   const { main, wt, mainTree, wtTree } = repoWithWorktree('sd-itg-wt-');

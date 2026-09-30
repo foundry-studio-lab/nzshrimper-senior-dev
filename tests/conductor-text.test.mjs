@@ -40,6 +40,13 @@ test('fix round 1: manifest wording, degrade flags, test question scope', () => 
   assert.match(skill, /7\. \*\*Test commands[^]*?never for `docs-only` or `investigation`/);
 });
 
+test('M3: gates section says a green test run satisfies the commit gate and integration includes the test rules', () => {
+  const gates = skill.slice(skill.indexOf('## Gates and bypass'), skill.indexOf('## 2. The chains')).replace(/\s+/g, ' ');
+  assert.match(gates, /green `state-cli test` run/);
+  assert.match(gates, /`tests-green` only for repos without a tests config/);
+  assert.match(gates, /one full run[^.]*coverage on push\/PR/);
+});
+
 test('manifests are 0.4.0', () => {
   const p = JSON.parse(read('.claude-plugin/plugin.json'));
   const m = JSON.parse(read('.claude-plugin/marketplace.json'));

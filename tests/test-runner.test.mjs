@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, readFileSync, existsSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { readState, writeSkillsConfig } from '../scripts/lib/state.mjs';
 import { shq, fill, parseJUnit, wouldCommitTree } from '../scripts/lib/test-runner.mjs';
 
@@ -251,6 +251,21 @@ test('non-ASCII changed files reach {files} unquoted', () => {
   assert.equal(cli(t.dir, ['test', '--affected']).status, 0);
   assert.deepEqual(readState(t.dir).testRuns[0].files, ['é.js']);
   assert.ok(t.markers().at(-1).endsWith('REL é.js'));
+});
+
+test('M2: set-tests warns when --report is inside the repo and not git-ignored', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'sd-tr-rep-'));
+  g(dir, 'init', '-q');
+  const run = (report) => spawnSync('node', [CLI, 'skills-config', 'set-tests', '--full', 'x', '--report', report],
+    { cwd: dir, encoding: 'utf8', env: { ...process.env, SENIOR_DEV_OFFLINE: '1' } });
+  const warn = (p) => `senior-dev: report path ${p} is not git-ignored - add it to .gitignore so it is never committed`;
+  let r = run('out/junit.xml');
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(r.stderr.includes(warn('out/junit.xml')), r.stderr);
+  writeFileSync(join(dir, '.gitignore'), 'out/\n');
+  assert.ok(!run('out/junit.xml').stderr.includes('not git-ignored'));
+  assert.ok(!run('.senior-dev/junit.xml').stderr.includes('not git-ignored'));
+  assert.ok(!run(join(tmpdir(), 'elsewhere.xml')).stderr.includes('not git-ignored'));
 });
 
 // ---- F2 / F4 ----

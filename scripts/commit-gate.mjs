@@ -8,7 +8,7 @@ import { join, resolve, isAbsolute } from 'node:path';
 import { createHash } from 'node:crypto';
 import {
   findRepoRoot, readState, hasActiveSession, currentPhase,
-  integrationBlockers, consumeBypass, readSkillsConfig, headTree,
+  integrationBlockers, consumeBypass, readSkillsConfig, headTree, headCommit,
 } from './lib/state.mjs';
 
 const TEST_GATED_PHASES = new Set(['implement', 'debug']);
@@ -179,9 +179,11 @@ async function main() {
       // checked against the target checkout's HEAD (a `-C` dir, else cwd).
       // A merge's tree does not exist yet, so merges get rules 1-2 only.
       const shipping = integrations.filter((x) => x.kind === 'push' || x.kind === 'pr-create');
+      const targets = shipping.map((x) => resolve(cwd, x.dir ?? '.'));
       const blockers = integrationBlockers(state, {
         tests: readSkillsConfig(repoRoot)?.tests,
-        trees: shipping.length ? shipping.map((x) => headTree(resolve(cwd, x.dir ?? '.'))) : undefined,
+        trees: shipping.length ? targets.map((d) => headTree(d)) : undefined,
+        heads: targets.map((d) => headCommit(d)),
       });
       if (blockers.length) {
         blockMsg = `integration blocked (${blockers.length} item${blockers.length > 1 ? 's' : ''}):\n- ${blockers.join('\n- ')}`;

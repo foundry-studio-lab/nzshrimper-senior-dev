@@ -149,10 +149,13 @@ silently skipped.
 
 ## Gates and bypass
 
-- **Commit gate**: blocks `git commit` during `implement`/`debug` until
-  `state-cli tests-green` is recorded for that phase; blocks
-  `push`/`merge`/`gh pr create` until reviews are APPROVED, `verify` is
-  done, and the docs gate is clear.
+- **Commit gate**: blocks `git commit` during `implement`/`debug` until a
+  green `state-cli test` run is recorded for that phase (`tests-green` only
+  for repos without a tests config); blocks `push`/`merge`/`gh pr create`
+  until reviews are APPROVED, `verify` is done, the docs gate is clear,
+  and, with a tests config, the test rules hold: one full run, green or
+  waived, plus coverage on push/PR of the tree being shipped. `finish` and
+  `status` apply the same test rules.
 - **Stop gate**: challenges any claim that the session is done (or that
   you've reached the `finish` phase) while gate items are still open.
 - The waivers are `/senior-dev:bypass <reason>` and, for test failures

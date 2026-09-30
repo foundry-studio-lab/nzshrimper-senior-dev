@@ -11,6 +11,19 @@ clustering in five places; each is now a first-class, logged operation.
   integration gate wants ONE green full run, then only affected tests for
   later changes, checked at push / PR creation (not at local merge). A repo
   with no `tests` config, or `set-tests --none`, behaves exactly as 0.3.1.
+- `test --affected` runs the full suite when any file was deleted (or
+  renamed away) since the base, and whenever its file list is empty at a
+  tree the latest full run did not cover. Explicit files add to the
+  changed-file list instead of replacing it.
+- `finish` and `status` apply the test rules too: a local merge of an
+  untested tree can no longer be finished and pushed later with the session
+  gone. A coverage blocker names uncommitted changes when that is the cause.
+- The gate classifier keeps quoted flag values in place (`git -C "/a b"
+  push`, `git -c 'k=v' push`, `gh --repo "o/r" pr create`); a `-C` holding a
+  command substitution or variable fails coverage closed, and `git -C
+  <repo> push` from outside any repo finds that repo's session.
+- `set-tests` warns when `--report` points inside the repo at a path that is
+  not git-ignored.
 - `test --preexisting <id>` proves a failure also fails on the session's base
   commit (temporary worktree, JUnit report required). Never proven by a crash.
 - `CONTRADICTION` stop: a test that fails, passes, then fails again in a
