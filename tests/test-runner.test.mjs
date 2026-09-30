@@ -186,6 +186,41 @@ test('--affected works in a repo with no commits yet (every file counts as affec
   assert.ok(readFileSync(log, 'utf8').includes('REL a.js staged.js'));
 });
 
+test('--affected works in an unborn SHA-256 repo (empty tree asked of git, not hard-coded)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'sd-sha256-'));
+  const init = spawnSync('git', ['init', '-q', '--object-format=sha256', dir], { encoding: 'utf8' });
+  if (init.status !== 0) return; // git build without SHA-256 support: nothing to check
+  g(dir, 'config', 'user.email', 't@t'); g(dir, 'config', 'user.name', 't');
+  writeSkillsConfig(dir, { version: 4, source: 'superpowers', shared: false, tests: { full: 'node -e 0', related: 'node -e 0 {files}' } });
+  cli(dir, ['init', '--task', 't', '--type', 'quick-fix']);
+  writeFileSync(join(dir, 'a.js'), '1'); g(dir, 'add', 'a.js');
+  const r = cli(dir, ['test', '--affected']);
+  assert.equal(r.status, 0, r.out);
+  assert.deepEqual(readState(dir).testRuns.at(-1).files, ['a.js']);
+});
+
+test('--affected after a full run taken before the first commit still sees committed edits', () => {
+  // The full run has head null; diffing later runs against HEAD would miss a
+  // file edited after that run and committed since.
+  const dir = mkdtempSync(join(tmpdir(), 'sd-unborn2-'));
+  const aux = mkdtempSync(join(tmpdir(), 'sd-unborn2-aux-'));
+  g(dir, 'init', '-q');
+  g(dir, 'config', 'user.email', 't@t'); g(dir, 'config', 'user.name', 't');
+  const log = join(aux, 'log');
+  const rec = `node -e "require('fs').appendFileSync(process.argv[1], process.argv.slice(2).join(' ') + '\\n')" ${log}`;
+  writeSkillsConfig(dir, { version: 4, source: 'superpowers', shared: false, tests: { full: `${rec} FULL`, related: `${rec} REL {files}` } });
+  cli(dir, ['init', '--task', 't', '--type', 'quick-fix']);
+  for (const f of ['a.js', 'b.js', 'c.js']) writeFileSync(join(dir, f), '1');
+  assert.equal(cli(dir, ['test', '--full']).status, 0);
+  assert.equal(readState(dir).testRuns.at(-1).head, null);
+  g(dir, 'add', '-A'); g(dir, 'commit', '-qm', 'first');
+  writeFileSync(join(dir, 'b.js'), '2'); g(dir, 'add', 'b.js'); g(dir, 'commit', '-qm', 'edit b');
+  writeFileSync(join(dir, 'c.js'), '2');
+  assert.equal(cli(dir, ['test', '--affected']).status, 0);
+  const run = readState(dir).testRuns.at(-1);
+  assert.ok(run.files.includes('b.js'), JSON.stringify(run));
+});
+
 test('--affected defaults to files changed since the last full run', () => {
   const t = setup();
   assert.equal(cli(t.dir, ['test', '--full']).status, 0);

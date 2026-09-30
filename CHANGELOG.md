@@ -14,8 +14,9 @@ clustering in five places; each is now a first-class, logged operation.
 - A run's tree fingerprint keeps the real index's mtime on its temporary
   copy, so a same-size edit made just after the last index write is not
   recorded as the old content (git's racily-clean check stays in force).
-- `test --affected` works before a repo's first commit (every file counts as
-  affected).
+- `test --affected` works before a repo's first commit, and after a full run
+  taken before it: every file counts as affected (the empty tree is asked of
+  git, so SHA-256 repos work too).
 - `test --affected` runs the full suite when any file was deleted (or
   renamed away) since the base, and whenever its file list is empty at a
   tree the latest full run did not cover. Explicit files add to the

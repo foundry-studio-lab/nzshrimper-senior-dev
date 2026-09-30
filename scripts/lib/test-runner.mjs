@@ -128,10 +128,14 @@ export function runTest({ repoRoot, cwd, state, cfg, kind, files, test }) {
   if (kind === 'affected') {
     if (!t.related) cmdKind = 'full';
     else {
-      // No commit yet (unborn HEAD): diff against the empty tree, so every
-      // staged file counts as affected (untracked ones come from ls-files).
-      const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
-      const changed = changedFiles(cwd, last('full')?.head || state.baseHead || (headSha(cwd) ? 'HEAD' : EMPTY_TREE));
+      // No commit to diff against (unborn HEAD, or a full run taken before
+      // the first commit): use the empty tree, so every file counts as
+      // affected (untracked ones come from ls-files).
+      // Asked of git: the empty tree's id depends on the repo's object format.
+      const emptyTree = () => gitOut(cwd, ['hash-object', '-t', 'tree', '/dev/null']);
+      const F = last('full');
+      const base = F ? (F.head || emptyTree()) : (state.baseHead || (headSha(cwd) ? 'HEAD' : emptyTree()));
+      const changed = changedFiles(cwd, base);
       deleted = changed.deleted;
       // Explicit files add to the changed list, never replace it.
       runFiles = [...new Set([...(files || []), ...changed.files])].sort();
