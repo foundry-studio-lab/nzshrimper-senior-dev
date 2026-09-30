@@ -69,9 +69,10 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/state-cli.mjs" <subcommand> [flags]
 5. Initialise: `state-cli init --task "<one-line task>" --type <type>`
 6. **Skill check (fresh run only, after `init`).** Check every phase skill the
    resolved chain names against the skills visible in this session, once. Any
-   that is not listed: record `state-cli degrade` now, not mid-run.
+   that is not listed: record it now, not mid-run: `state-cli degrade --wanted
+   "<skill>" --used "<fallback>" --reason "not in visible skill list"`.
 7. **Test commands (once per repo, the first time a lane with an `implement`
-   phase starts).** If `state-cli skills-config show` has no `tests` block,
+   phase starts; never for `docs-only` or `investigation`).** If `state-cli skills-config show` has no `tests` block,
    ask for the commands, offering a guess from `package.json` (or the repo's
    CLAUDE.md): `full` (required), plus `related`, `one`, `report` (a JUnit XML
    path), `setup`, `build` where they exist. Record with

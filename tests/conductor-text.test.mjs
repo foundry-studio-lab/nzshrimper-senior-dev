@@ -33,6 +33,13 @@ test('codex prompt has the spec axis and placeholder', () => {
   assert.ok(prompt.includes('compare the diff to it and report missing requirements, scope beyond it, and behaviour that contradicts it as concerns'));
 });
 
+test('fix round 1: manifest wording, degrade flags, test question scope', () => {
+  assert.ok(!read('.claude-plugin/plugin.json').includes('built-in reviews'));
+  assert.ok(!read('.claude-plugin/marketplace.json').includes('built-in reviews'));
+  assert.match(skill, /Skill check[\s\S]*?--wanted[\s\S]*?7\. \*\*Test commands/);
+  assert.match(skill, /7\. \*\*Test commands[^]*?never for `docs-only` or `investigation`/);
+});
+
 test('manifests are 0.4.0', () => {
   const p = JSON.parse(read('.claude-plugin/plugin.json'));
   const m = JSON.parse(read('.claude-plugin/marketplace.json'));
