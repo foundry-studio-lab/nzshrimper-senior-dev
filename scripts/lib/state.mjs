@@ -57,6 +57,17 @@ export function findRepoRoot(cwd = process.cwd()) {
   }
 }
 
+// The tree of HEAD in the checkout at cwd; null when there are no commits.
+export function headTree(cwd) {
+  try {
+    return execFileSync('git', ['rev-parse', 'HEAD^{tree}'], {
+      cwd, stdio: ['ignore', 'pipe', 'ignore'],
+    }).toString().trim() || null;
+  } catch {
+    return null;
+  }
+}
+
 export function statePath(repoRoot) {
   return join(repoRoot, '.senior-dev', 'state.json');
 }
@@ -300,7 +311,7 @@ export function ensureExcluded(repoRoot) {
 
     // Lines we manage. skills.json is excluded only when NOT shared; the
     // guard bundle is machine-local (installed per-clone), always excluded.
-    const want = ['.senior-dev/state.json', '.senior-dev/history/', '.senior-dev/guard/'];
+    const want = ['.senior-dev/state.json', '.senior-dev/history/', '.senior-dev/guard/', '.senior-dev/junit.xml'];
     if (!shared) want.push('.senior-dev/skills.json');
 
     // Start from existing lines, drop the legacy wholesale line and any of
@@ -309,7 +320,7 @@ export function ensureExcluded(repoRoot) {
     const managed = new Set([
       '.senior-dev/', '.senior-dev/state.json',
       '.senior-dev/history/', '.senior-dev/skills.json',
-      '.senior-dev/guard/',
+      '.senior-dev/guard/', '.senior-dev/junit.xml',
     ]);
     const kept = cur.split('\n').filter((l) => l !== '' && !managed.has(l));
     const out = [...kept, ...want];

@@ -15,6 +15,7 @@ import {
   stampVersion, validTests, resolveModel, MODEL_PHASES, CLAUDE_TIERS, CODEX_EFFORTS, TIER_RANK,
 } from './lib/state.mjs';
 import { codexUpdateNotice } from './lib/codex-check.mjs';
+import { runTest, reprintContradictions, resolveContradiction } from './lib/test-runner.mjs';
 
 function fail(msg) {
   console.error(`senior-dev: ${msg}`);
@@ -250,6 +251,34 @@ switch (cmd) {
     writeState(repoRoot, state);
     console.log(`tests green recorded on phase '${cur}'`);
     break;
+  }
+  case 'test': {
+    const state = requireSession(repoRoot);
+    requireValues('test', flags, ['one', 'resolve', 'reason']);
+    const cfg = readSkillsConfig(repoRoot);
+    if (!cfg?.tests || cfg.tests.none) fail('no tests config - run skills-config set-tests, or use tests-green');
+    if (flags.resolve !== undefined) {
+      if (typeof flags.reason !== 'string' || !flags.reason) fail('test --resolve needs --reason "<text>"');
+      try { resolveContradiction(state, flags.resolve, flags.reason); } catch (e) { fail(e.message); }
+      writeState(repoRoot, state);
+      console.log(`contradiction resolved: ${flags.resolve}`);
+      break;
+    }
+    const modes = ['affected', 'one', 'full', 'build'].filter((m) => flags[m] !== undefined);
+    if (modes.length !== 1) fail('test needs exactly one of --affected [files...] | --one <id> | --full | --build | --resolve <id> --reason "<text>"');
+    const kind = modes[0];
+    // parseFlags hands the first token after --affected to it as a value; every
+    // non-flag token after --affected is a file.
+    const files = kind === 'affected' ? rest.slice(rest.indexOf('--affected') + 1).filter((a) => !a.startsWith('--')) : undefined;
+    let cwd;
+    try { cwd = execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); }
+    catch { fail('not inside a git repository'); }
+    let result;
+    try { result = runTest({ repoRoot, cwd, state, cfg, kind, files, test: kind === 'one' ? flags.one : undefined }); }
+    catch (e) { fail(e.message); }
+    if (kind === 'one' || kind === 'affected') reprintContradictions(state, result.run.id);
+    writeState(repoRoot, state);
+    process.exit(result.exit);
   }
   case 'review': {
     const state = requireSession(repoRoot);
@@ -790,5 +819,5 @@ switch (cmd) {
     break;
   }
   default:
-    fail(`unknown subcommand '${cmd || ''}'. Use: init|phase|tests-green|review|models|dispatch|docs|degrade|bypass|waiting|scratch|skills-config|skill-source|guard|status|sweep|finish`);
+    fail(`unknown subcommand '${cmd || ''}'. Use: init|phase|tests-green|test|review|models|dispatch|docs|degrade|bypass|waiting|scratch|skills-config|skill-source|guard|status|sweep|finish`);
 }
