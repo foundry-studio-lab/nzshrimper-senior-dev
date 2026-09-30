@@ -313,6 +313,7 @@ switch (cmd) {
       if (flags.uphold !== undefined && flags.uphold !== true) fail('review --uphold does not take a value');
       const decision = flags.overrule === true ? 'overruled' : 'upheld';
       const flagName = decision === 'overruled' ? '--overrule' : '--uphold';
+      if (flags.skill !== undefined) fail(`review ${flagName} does not take --skill - it names the review skill on a verdict record`);
       if (flags.verdict !== undefined) fail(`review ${flagName} does not take --verdict - it adjudicates the verdict already recorded at that cycle`);
       requireValues('review', flags, ['phase', 'reviewer', 'cycle', 'reason', 'by']);
       if (!flags.phase) fail('review needs --phase <name>');
@@ -343,7 +344,8 @@ switch (cmd) {
       console.log(`adjudication recorded: ${flags.phase} cycle ${cycle} ${flags.reviewer} ${decision} (by ${by})`);
       break;
     }
-    requireValues('review', flags, ['phase', 'reviewer', 'verdict', 'cycle']);
+    requireValues('review', flags, ['phase', 'reviewer', 'verdict', 'cycle', 'skill']);
+    if (flags.skill !== undefined && !flags.skill.trim()) fail('review --skill needs a non-empty skill name');
     if (!flags.phase) fail('review needs --phase <name>');
     if (!['codex', 'claude'].includes(flags.reviewer)) fail('review needs --reviewer codex|claude');
     if (!['APPROVED', 'NEEDS_REVISION'].includes(flags.verdict)) fail('review needs --verdict APPROVED|NEEDS_REVISION');
@@ -357,6 +359,7 @@ switch (cmd) {
     state.reviews.push({
       phase: flags.phase, reviewer: flags.reviewer, verdict: flags.verdict,
       cycle, at: new Date().toISOString(),
+      ...(flags.skill !== undefined && { skill: flags.skill.trim() }),
     });
     writeState(repoRoot, state);
     console.log(`review recorded: ${flags.phase} cycle ${cycle} -> ${flags.verdict}`);

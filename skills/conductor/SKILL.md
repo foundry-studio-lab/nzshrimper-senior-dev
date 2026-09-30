@@ -279,7 +279,7 @@ contract. A fresh subagent inherits nothing.
    reviewer: "compare the diff to it and report missing requirements, scope
    beyond it, and behaviour that contradicts it as concerns." Fix findings via
    `superpowers:systematic-debugging` + TDD, never by patching blind.
-   - Record: `state-cli review --phase <phase> --reviewer claude --verdict <V> --cycle <n>`
+   - Record: `state-cli review --phase <phase> --reviewer claude --verdict <V> --cycle <n> --skill <the skill that ran>`
 2. Codex pass (READ-ONLY, never `--write`):
    - Capture `git status --porcelain` and `git log -1 --format=%H` BEFORE.
    - Read the effort: `state-cli models --phase review` for a per-phase pass,
@@ -353,7 +353,8 @@ step 1 (no Codex pass on prose). `investigation` skips both 1 and 2 (no
 branch exists) and goes straight to the sweep.
 
 1. Final review passes - Claude (§3 step 1 naming rules) + read-only Codex - over the
-   complete branch diff, same procedure and recording as §3, recorded as
+   complete branch diff, same procedure and recording as §3 (the Claude
+   record carries `--skill <the skill that ran>`), recorded as
    `--phase finish`. Where the lane had a single implement phase already
    reviewed in full (§3), scope the final pass to integration diffs and
    unreviewed deltas rather than re-reviewing the same code — record it
