@@ -2,7 +2,7 @@
 
 > A disciplined senior developer, with a second reviewer over its shoulder, for every Claude Code coding session.
 
-![version](https://img.shields.io/badge/version-0.4.0-6b2c8a) ![license](https://img.shields.io/badge/license-MIT-1f3a5f) ![tests](https://img.shields.io/badge/tests-298%20passing-4a6b3a) ![Claude Code](https://img.shields.io/badge/Claude%20Code-plugin-1a1814)
+![version](https://img.shields.io/badge/version-0.4.0-6b2c8a) ![license](https://img.shields.io/badge/license-MIT-1f3a5f) ![tests](https://img.shields.io/badge/tests-303%20passing-4a6b3a) ![Claude Code](https://img.shields.io/badge/Claude%20Code-plugin-1a1814)
 
 senior-dev turns an ordinary coding session into a run with rails: it classifies
 the task, insists on the right chain of installed skills, reviews the work with
@@ -135,7 +135,8 @@ the block.
 ## Test runner
 
 Optional, per repo, in `.senior-dev/skills.json` (schema v4). The conductor
-asks once, the first time a lane with an `implement` phase starts:
+asks once, the first time a lane that changes code starts (not docs-only or
+investigation):
 
 ```json
 "tests": {
@@ -205,7 +206,7 @@ and `claude plugin update senior-dev@nzshrimper-senior-dev`, restart.</sub>
 | `/senior-dev:ship <reason>` | Operator-only: waive test failures proven to pre-exist on the base commit (logged; reviews, verify and docs still gate) |
 | `state-cli skills-config set-tests --full "<cmd>" [--related --one --report --setup --build]` \| `--none` | Configure the test runner for this repo (or opt out) |
 | `state-cli test --affected [files] \| --one <id> \| --full \| --build \| --preexisting <id> \| --resolve <id> --reason "<why>"` | Run and record tests |
-| `state-cli reclassify --type <t> --reason "<why>" [--by-operator]` | Change the session's lane; lowering needs the operator's yes |
+| `state-cli reclassify --type <t> --reason "<why>" [--by-operator]` | Change the session's lane; allowed without the operator only if the new lane's rank is same-or-higher and it drops no docs-gate key (lowering, or e.g. refactor to bug-fix dropping spec/plan, needs `--by-operator`) |
 | `state-cli finish --no-change "<reason>"` | Close a session that changed nothing |
 | `/senior-dev:guard [install\|status\|uninstall]` | Manage the universal enforcement git hooks |
 | `/senior-dev:finish` | Final Codex pass, sweep, archive, evidence summary |

@@ -226,7 +226,9 @@ test policy under feature step 4 applies.
 Record a green baseline (`state-cli test --full`, or `tests-green` without a
 `tests` config) BEFORE changing anything, then record a green run on
 `implement` after each change (test policy under feature step 4) - the
-baseline stamp does not carry forward as proof of a later green state.
+baseline stamp does not carry forward as proof of a later green state. With a
+`tests` config, that pre-change `test --full` baseline IS the lane's one full
+run; later changes need only `test --affected`, never a second full run.
 
 **quick-fix** — `implement → review → verify → docs → finish`
 No spec/plan. Review is one focused Claude pass (§3 step 1); no subagent

@@ -24,7 +24,9 @@ clustering in five places; each is now a first-class, logged operation.
 - The gate classifier keeps quoted flag values in place (`git -C "/a b"
   push`, `git -c 'k=v' push`, `gh --repo "o/r" pr create`); a `-C` holding a
   command substitution or variable fails coverage closed, and `git -C
-  <repo> push` from outside any repo finds that repo's session.
+  <repo> push` finds that repo's session (the `-C` target wins over cwd's
+  repo). This fix applies to repos without a tests config too: it only blocks
+  more (such commands used to slip past the review, verify and docs gates).
 - `set-tests` warns when `--report` points inside the repo at a path that is
   not git-ignored.
 - `test --preexisting <id>` proves a failure also fails on the session's base
@@ -34,8 +36,10 @@ clustering in five places; each is now a first-class, logged operation.
 - `/senior-dev:ship <reason>` (operator-only) waives proven pre-existing
   failures for the session. Reviews, verify and the docs gate still apply.
 - `state-cli reclassify --type <t> --reason` changes lane in the same
-  session (lowering needs `--by-operator`), replacing the force-open
-  escalation. `init` records `baseHead`/`baseRefs`.
+  session, replacing the force-open escalation. It needs no operator only when
+  the new lane's rank is same-or-higher and it removes no docs-gate key the
+  current lane has; lowering, or dropping gate items (refactor to bug-fix
+  drops spec, plan), needs `--by-operator`. `init` records `baseHead`/`baseRefs`.
 - Review cycle 4 records only a confirming APPROVED. `finish --no-change
   "<reason>"` closes a session that changed nothing, after the CLI checks it.
 - The conductor names only skills that exist: `superpowers:verification-before-completion`
