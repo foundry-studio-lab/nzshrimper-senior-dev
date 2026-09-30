@@ -11,6 +11,9 @@ clustering in five places; each is now a first-class, logged operation.
   integration gate wants ONE green full run, then only affected tests for
   later changes, checked at push / PR creation (not at local merge). A repo
   with no `tests` config, or `set-tests --none`, behaves exactly as 0.3.1.
+- A run's tree fingerprint keeps the real index's mtime on its temporary
+  copy, so a same-size edit made just after the last index write is not
+  recorded as the old content (git's racily-clean check stays in force).
 - `test --affected` runs the full suite when any file was deleted (or
   renamed away) since the base, and whenever its file list is empty at a
   tree the latest full run did not cover. Explicit files add to the

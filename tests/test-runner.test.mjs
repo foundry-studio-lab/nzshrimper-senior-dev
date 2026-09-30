@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, readFileSync, existsSync, mkdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, existsSync, mkdirSync, rmSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -92,6 +92,26 @@ test('wouldCommitTree matches HEAD tree after committing and never touches the r
   assert.equal(g(dir, 'ls-tree', '-r', '--name-only', tree).split('\n').includes('ign.txt'), false);
   g(dir, 'add', '-A'); g(dir, 'commit', '-qm', 'two');
   assert.equal(g(dir, 'rev-parse', 'HEAD^{tree}'), tree);
+});
+
+test('wouldCommitTree sees a same-size edit git itself only catches as racily clean', () => {
+  // Backdate a.js before committing so its index entry is not smudged, then
+  // make a same-size edit with the same mtime (ctime ignored) and give the
+  // real index that same mtime: git's racy-clean check is now the only thing
+  // that notices the edit. A temp index copy with a fresh mtime defeats it.
+  const dir = mkdtempSync(join(tmpdir(), 'sd-racy-'));
+  g(dir, 'init', '-q');
+  g(dir, 'config', 'user.email', 't@t'); g(dir, 'config', 'user.name', 't');
+  g(dir, 'config', 'core.trustctime', 'false');
+  const a = join(dir, 'a.js');
+  const old = new Date(Date.now() - 3600_000);
+  writeFileSync(a, '1'); utimesSync(a, old, old);
+  g(dir, 'add', '-A'); g(dir, 'commit', '-qm', 'i');
+  writeFileSync(a, '2'); utimesSync(a, old, old);
+  utimesSync(join(dir, '.git', 'index'), old, old);
+  // git's own check sees it (--no-optional-locks: status must not rewrite, and so smudge, the index)
+  assert.equal(g(dir, '--no-optional-locks', 'status', '--porcelain'), 'M a.js');
+  assert.notEqual(wouldCommitTree(dir), g(dir, 'rev-parse', 'HEAD^{tree}'));
 });
 
 test('--full records failures from the report; red run exits 1 and sets no testsGreenAt', () => {

@@ -1,6 +1,6 @@
 // `state-cli test`: run the configured commands, record every run in state.
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, copyFileSync, existsSync, rmSync, readFileSync } from 'node:fs';
+import { mkdtempSync, copyFileSync, existsSync, rmSync, readFileSync, statSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { currentPhase, headTree } from './state.mjs';
@@ -48,7 +48,13 @@ export function wouldCommitTree(cwd) {
   const tmp = join(dir, 'index');
   try {
     const real = gitOut(cwd, ['rev-parse', '--path-format=absolute', '--git-path', 'index']);
-    if (existsSync(real)) copyFileSync(real, tmp);
+    if (existsSync(real)) {
+      copyFileSync(real, tmp);
+      // Keep the index's mtime: git treats entries at or after it as racily
+      // clean and re-hashes them; a fresh copy mtime makes it trust stale stat.
+      const st = statSync(real);
+      utimesSync(tmp, st.atime, st.mtime);
+    }
     const env = { GIT_INDEX_FILE: tmp };
     gitOut(cwd, ['add', '-A'], env);
     return gitOut(cwd, ['write-tree'], env);
