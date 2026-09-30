@@ -54,15 +54,39 @@ export function integrationTargets(command) {
   return parseCommand(command).integrations;
 }
 
+// A `-C` value the gate cannot know (command substitution, variable): the
+// NUL makes every git call on it fail, so headTree is null and coverage
+// fails closed.
+const UNRESOLVED = '\0unresolved';
+
+// The literal path a token stands for, or null when the shell would expand
+// it. Placeholders map back to their quoted spans; single quotes are literal.
+function literalToken(token, quoted) {
+  if (/[$`]/.test(token.replace(/\0\d+\0/g, ''))) return null;
+  let bad = false;
+  const out = token.replace(/\0(\d+)\0/g, (_, n) => {
+    const q = quoted[n];
+    const body = q.slice(1, -1);
+    if (q[0] === "'") return body;
+    if (/[$`]/.test(body)) bad = true;
+    return body.replace(/\\(["\\\n])/g, '$1');
+  });
+  return bad ? null : out;
+}
+
 function parseCommand(command) {
   // Heredocs BEFORE quotes: the delimiter may itself be quoted (<<'EOF'),
   // and quote-stripping first would erase the delimiter while leaving the
   // body lines behind as apparent commands. The canonical
   // `git commit -m "$(cat <<'EOF' ... EOF)"` form survives this order: the
   // body and terminator are dropped, then the remaining double-quoted span
-  // (still containing the marker) is stripped, leaving `git commit -m`.
+  // (still containing the marker) becomes one placeholder token.
+  // Each quoted span becomes ONE placeholder token (\0<n>\0), so a quoted
+  // flag value still occupies its position (`-C "/a b" push`); the
+  // contents stay in `quoted` for resolving `-C`.
   const noHeredocs = stripHeredocBodies(command);
-  const stripped = noHeredocs.replace(/"(?:[^"\\]|\\.)*"|'[^']*'/g, '');
+  const quoted = [];
+  const stripped = noHeredocs.replace(/"(?:[^"\\]|\\.)*"|'[^']*'/g, (m) => `\0${quoted.push(m) - 1}\0`);
   const segments = stripped.split(/&&|\|\||;|\n|\|/);
 
   let commit = false;
@@ -84,13 +108,14 @@ function parseCommand(command) {
     let i = 0;
     const dirs = [];
     while (i < rest.length && rest[i].startsWith('-')) {
-      if (head === 'git' && rest[i] === '-C' && i + 1 < rest.length) dirs.push(rest[i + 1]);
+      if (head === 'git' && rest[i] === '-C' && i + 1 < rest.length) dirs.push(literalToken(rest[i + 1], quoted));
       if (VALUE_FLAGS.has(rest[i])) i += 2;
       else i += 1;
     }
     if (i >= rest.length) continue;
     // Later -C values are relative to earlier ones; an absolute one resets.
-    const dir = dirs.length ? dirs.reduce((a, d) => (isAbsolute(d) ? d : join(a, d))) : null;
+    const dir = !dirs.length ? null : dirs.includes(null) ? UNRESOLVED
+      : dirs.reduce((a, d) => (isAbsolute(d) ? d : join(a, d)));
     const add = (kind) => { integration = true; integrations.push({ kind, dir }); };
 
     if (head === 'git') {
@@ -133,7 +158,13 @@ async function main() {
     const { commit: isCommit, integration: isIntegration, integrations } = parseCommand(command);
     if (!isIntegration && !isCommit) process.exit(0);
 
-    const repoRoot = findRepoRoot(data.cwd || process.cwd());
+    const cwd = data.cwd || process.cwd();
+    // cwd outside any repo: `git -C /repo push` still targets /repo's session.
+    let repoRoot = findRepoRoot(cwd);
+    for (const x of integrations) {
+      if (repoRoot) break;
+      if (x.dir && x.dir !== UNRESOLVED) repoRoot = findRepoRoot(resolve(cwd, x.dir));
+    }
     if (!repoRoot) process.exit(0);
     const state = readState(repoRoot);
     if (!hasActiveSession(state)) process.exit(0);
@@ -147,7 +178,6 @@ async function main() {
       // Coverage (§3.3 rule 3) only where code ships: push and gh pr create,
       // checked against the target checkout's HEAD (a `-C` dir, else cwd).
       // A merge's tree does not exist yet, so merges get rules 1-2 only.
-      const cwd = data.cwd || process.cwd();
       const shipping = integrations.filter((x) => x.kind === 'push' || x.kind === 'pr-create');
       const blockers = integrationBlockers(state, {
         tests: readSkillsConfig(repoRoot)?.tests,

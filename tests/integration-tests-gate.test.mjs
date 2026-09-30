@@ -270,3 +270,44 @@ test('guard pre-push stdin reaches both a chained prior hook and the guard', () 
   assert.equal(r.status, 1);
   assert.ok(r.stderr.includes(NOT_COVERED));
 });
+
+// ---- F1: quoted flag values ----
+test('F1: quoted flag values keep token positions', () => {
+  const kinds = (c) => integrationTargets(c).map((x) => x.kind);
+  assert.deepEqual(kinds('git -C "/a b" push'), ['push']);
+  assert.deepEqual(kinds('git -C "$(pwd)" push origin main'), ['push']);
+  assert.deepEqual(kinds("git -c 'user.name=x' push"), ['push']);
+  assert.deepEqual(kinds('git -C "/a b" merge x'), ['merge']);
+  assert.deepEqual(kinds('gh --repo "o/r" pr create'), ['pr-create']);
+  assert.equal(integrationTargets('git -C "/a b" push')[0].dir, '/a b');
+  assert.equal(integrationTargets("git -C '/a $b' push")[0].dir, '/a $b'); // single quotes are literal
+});
+
+test('F1: git -C "$(pwd)" push fails closed on coverage', () => {
+  const { main, mainTree } = repoWithWorktree('sd-itg-sub-');
+  for (const tree of ['another-tree', mainTree]) {
+    writeState(main, clearState({ testRuns: [full(1, { tree })] }));
+    const r = gateAt(main, 'git -C "$(pwd)" push origin main');
+    assert.equal(r.status, 2, tree);
+    assert.ok(r.out.includes(NOT_COVERED), r.out);
+  }
+});
+
+test('F1: a quoted literal -C path resolves to that checkout\'s tree', () => {
+  const { main, wt, mainTree, wtTree } = repoWithWorktree('sd itg q ');
+  writeState(main, clearState({ testRuns: [full(1, { tree: wtTree })] }));
+  const r = gateAt(wt, `git -C "${main}" push origin main`);
+  assert.equal(r.status, 2);
+  assert.ok(r.out.includes(NOT_COVERED));
+  writeState(main, clearState({ testRuns: [full(1, { tree: mainTree })] }));
+  assert.equal(gateAt(wt, `git -C "${main}" push origin main`).status, 0);
+});
+
+test('F1: git -C <repo> push from outside any repo finds the session', () => {
+  const { main } = repoWithWorktree('sd-itg-out-');
+  const outside = mkdtempSync(join(tmpdir(), 'sd-itg-nogit-'));
+  writeState(main, clearState({ testRuns: [full(1, { tree: 'elsewhere' })] }));
+  const r = gateAt(outside, `git -C ${main} push origin main`);
+  assert.equal(r.status, 2);
+  assert.ok(r.out.includes(NOT_COVERED));
+});
