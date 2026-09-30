@@ -12,7 +12,7 @@ import {
   CHAINS, DOCS_GATE, findRepoRoot, readState, writeState, statePath,
   hasActiveSession, currentPhase, latestVerdicts, latestReview, openGateItems, ensureExcluded,
   VALID_SOURCES, readSkillsConfig, writeSkillsConfig, resolveConfiguredSkill, normalizeLaneValue,
-  stampVersion, validTests, resolveModel, MODEL_PHASES, CLAUDE_TIERS, CODEX_EFFORTS, TIER_RANK,
+  stampVersion, validTests, headTree, testBlockers, resolveModel, MODEL_PHASES, CLAUDE_TIERS, CODEX_EFFORTS, TIER_RANK,
 } from './lib/state.mjs';
 import { codexUpdateNotice } from './lib/codex-check.mjs';
 import { runTest, provePreexisting, reprintContradictions, resolveContradiction } from './lib/test-runner.mjs';
@@ -443,6 +443,36 @@ switch (cmd) {
     console.log(`bypass armed (one-shot) - reason logged: ${reason}`);
     break;
   }
+  case 'ship': {
+    const state = requireSession(repoRoot);
+    const stdinFlag = flags['reason-stdin'];
+    if (stdinFlag !== undefined && stdinFlag !== true) fail('ship --reason-stdin does not take a value');
+    const useStdin = stdinFlag === true;
+    const hasReason = typeof flags.reason === 'string';
+    if (useStdin === hasReason) fail('ship needs exactly one of --reason "<why>" or --reason-stdin');
+    const reason = useStdin ? (await readStdin()).trim() : flags.reason.trim();
+    if (!reason) fail('ship needs a non-empty reason');
+    if (state.ship) fail('ship already armed');
+    const cfg = readSkillsConfig(repoRoot);
+    if (!cfg?.tests || cfg.tests.none) fail('no tests config - nothing to waive');
+    let cwd;
+    try { cwd = execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); }
+    catch { fail('not inside a git repository'); }
+    const tree = headTree(cwd);
+    const runs = state.testRuns || [];
+    const F = runs.filter((r) => r.kind === 'full').reduce((m, r) => (!m || r.id > m.id ? r : m), null);
+    if (F && F.exit === 0) fail('full run is green - nothing to waive');
+    // Reuse the gate's own rules as if armed: what it still reports is what ship must refuse on.
+    const refusals = testBlockers({ ...state, ship: {} }, { tests: cfg.tests, trees: [tree] });
+    if (refusals.length) fail(`cannot ship: ${refusals.join('; ')}`);
+    if (cfg.tests.build && !runs.some((r) => r.kind === 'build' && r.exit === 0 && r.tree === tree)) {
+      fail('cannot ship: build is configured and there is no green build at the current tree (state-cli test --build)');
+    }
+    state.ship = { reason, at: new Date().toISOString(), fullRun: F.id };
+    writeState(repoRoot, state);
+    console.log(`ship armed - waives only proven pre-existing failures of full run #${F.id}; reviews, verify and docs still gate. Reason logged: ${reason}`);
+    break;
+  }
   case 'waiting': {
     const state = requireSession(repoRoot);
     requireValues('waiting', flags, ['on']);
@@ -525,6 +555,7 @@ switch (cmd) {
     }
     if (state.bypasses.length) console.log(`bypasses used: ${state.bypasses.map((b) => `${b.action}: ${b.reason}`).join('; ')}`);
     if (state.bypassArmed) console.log(`bypass ARMED: ${state.bypassArmed.reason}`);
+    if (state.ship) console.log(`SHIP armed: ${state.ship.reason} (full run #${state.ship.fullRun})`);
     if ((state.waits || []).length) console.log(`past waits: ${state.waits.length}`);
     const open = openGateItems(state);
     console.log(open.length ? `open gate items (${open.length}):\n  - ${open.join('\n  - ')}` : 'all gates clear.');
