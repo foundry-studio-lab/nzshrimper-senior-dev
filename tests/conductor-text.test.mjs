@@ -1,0 +1,42 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { join, dirname } from 'node:path';
+
+const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+const read = (p) => readFileSync(join(root, p), 'utf8');
+const skill = read('skills/conductor/SKILL.md');
+const prompt = read('skills/conductor/references/codex-review-prompt.md');
+
+test('conductor names the v0.4 CLI surface', () => {
+  for (const s of ['state-cli test --affected', 'state-cli test --full', 'test --preexisting', 'CONTRADICTION',
+    '/senior-dev:ship', 'state-cli reclassify', 'finish --no-change', 'set-tests --none',
+    'superpowers:verification-before-completion', 'superpowers:requesting-code-review', 'push / PR creation']) {
+    assert.ok(skill.includes(s), `SKILL.md missing: ${s}`);
+  }
+});
+
+test('conductor drops the fictional and old wording', () => {
+  assert.ok(!skill.includes('built-in `verify`'));
+  assert.ok(!skill.includes('finish --force-open "escalating'));
+});
+
+test('conductor description stays within the 1024 cap and names no fictional skill', () => {
+  const m = skill.match(/^description: (.*)$/m);
+  assert.ok(m && m[1].length <= 1024, `description length ${m && m[1].length}`);
+  assert.ok(!m[1].includes('built-in code-review and verify'));
+});
+
+test('codex prompt has the spec axis and placeholder', () => {
+  assert.ok(prompt.includes('<SPEC>'));
+  assert.ok(prompt.includes('compare the diff to it and report missing requirements, scope beyond it, and behaviour that contradicts it as concerns'));
+});
+
+test('manifests are 0.4.0', () => {
+  const p = JSON.parse(read('.claude-plugin/plugin.json'));
+  const m = JSON.parse(read('.claude-plugin/marketplace.json'));
+  assert.equal(p.version, '0.4.0');
+  assert.equal(m.metadata.version, '0.4.0');
+  assert.equal(m.plugins[0].version, '0.4.0');
+});

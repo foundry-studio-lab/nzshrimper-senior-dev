@@ -1,5 +1,42 @@
 # Changelog
 
+## 0.4.0 — 2026-09-30
+
+Friction pass. An audit of 441 archived sessions found the bypasses
+clustering in five places; each is now a first-class, logged operation.
+
+- Test runner (optional `tests` block in `skills.json`, schema v4, written
+  by `skills-config set-tests`). `state-cli test` runs `--affected`, `--one`,
+  `--full`, `--build` and records every run with the tree it covered. The
+  integration gate wants ONE green full run, then only affected tests for
+  later changes, checked at push / PR creation (not at local merge). A repo
+  with no `tests` config, or `set-tests --none`, behaves exactly as 0.3.1.
+- `test --preexisting <id>` proves a failure also fails on the session's base
+  commit (temporary worktree, JUnit report required). Never proven by a crash.
+- `CONTRADICTION` stop: a test that fails, passes, then fails again in a
+  phase halts the fix loop until the operator answers (`test --resolve`).
+- `/senior-dev:ship <reason>` (operator-only) waives proven pre-existing
+  failures for the session. Reviews, verify and the docs gate still apply.
+- `state-cli reclassify --type <t> --reason` changes lane in the same
+  session (lowering needs `--by-operator`), replacing the force-open
+  escalation. `init` records `baseHead`/`baseRefs`.
+- Review cycle 4 records only a confirming APPROVED. `finish --no-change
+  "<reason>"` closes a session that changed nothing, after the CLI checks it.
+- The conductor names only skills that exist: `superpowers:verification-before-completion`
+  for verify, `superpowers:requesting-code-review` for the Claude pass
+  (`/code-review` only when that exact skill is listed), and checks phase
+  skills against the visible list once at engage. Review prompts gain a
+  spec axis (`<SPEC>` in the Codex prompt).
+
+Upgrade note: existing universal-guard installs keep the old pre-push shim
+until it is refreshed. The version bump makes `state-cli guard status`
+report `stale`, which the conductor's resume step refreshes with
+`state-cli guard install`; run it yourself to pick up the new pre-push shim
+(it buffers stdin so a chained prior hook and the guard both see the pushed
+refs).
+
+Known ceilings are listed in the spec (section 9).
+
 ## 0.3.1 — 2026-09-14
 
 Hygiene pass over the 0.3.0 CLI: the inputs below used to be dropped or

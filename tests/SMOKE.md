@@ -61,3 +61,16 @@ Setup: `mkdir -p <scratch>/sd-smoke && cd <scratch>/sd-smoke && git init && git 
 24. [ ] `dispatch --phase implement --claude haiku` refuses ("never lowers");
         `--claude opus` without `--reason` refuses; with `--reason` records
         and `status` shows `models used:` with the raise.
+25. [ ] Test runner + ship on a REAL vitest repo (needs `junit` reporter):
+        `skills-config set-tests` with full/related/one/report -> start a
+        bug-fix, `test --affected` after an edit, `test --full` once; make a
+        test fail on the base commit too -> `test --preexisting <id>` PROVEN
+        -> `/senior-dev:ship <reason>` accepted, `status` shows the ship
+        line; a failure caused by the diff -> ship refused naming it. A
+        later commit without affected coverage -> `git push` BLOCKED.
+26. [ ] Reclassify: quick-fix session -> `state-cli reclassify --type
+        bug-fix --reason "grew"` -> same session, phases kept, `status`
+        shows the history; `--type docs-only` refused without `--by-operator`.
+27. [ ] `finish --no-change "<reason>"` on an untouched session -> archived
+        with outcome no-change; after a commit -> refused. Cycle 4 accepts
+        only `--verdict APPROVED`.

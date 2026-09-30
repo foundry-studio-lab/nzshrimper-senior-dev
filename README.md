@@ -2,14 +2,14 @@
 
 > A disciplined senior developer, with a second reviewer over its shoulder, for every Claude Code coding session.
 
-![version](https://img.shields.io/badge/version-0.2.0-6b2c8a) ![license](https://img.shields.io/badge/license-MIT-1f3a5f) ![tests](https://img.shields.io/badge/tests-135%20passing-4a6b3a) ![Claude Code](https://img.shields.io/badge/Claude%20Code-plugin-1a1814)
+![version](https://img.shields.io/badge/version-0.4.0-6b2c8a) ![license](https://img.shields.io/badge/license-MIT-1f3a5f) ![tests](https://img.shields.io/badge/tests-135%20passing-4a6b3a) ![Claude Code](https://img.shields.io/badge/Claude%20Code-plugin-1a1814)
 
 senior-dev turns an ordinary coding session into a run with rails: it classifies
 the task, insists on the right chain of installed skills, reviews the work with
 Claude **and** a read-only Codex pass, refuses to merge unreviewed or
 undocumented changes, and finishes by proving the repo is clean. It orchestrates
-skills you already have (superpowers, the codex plugin, the built-in
-`/code-review` and `verify`); it duplicates none of them.
+skills you already have (superpowers, the codex plugin, `/code-review` where
+installed); it duplicates none of them.
 
 It fills a gap no other plugin does: routing across your whole installed skill
 inventory, a cross-model review fired as a named phase gate, a documentation
@@ -132,6 +132,32 @@ the disputed concerns. Upheld concerns enter the fix loop. Overruled ones come
 to you as one yes or no; your yes is recorded and is the only thing that clears
 the block.
 
+## Test runner
+
+Optional, per repo, in `.senior-dev/skills.json` (schema v4). The conductor
+asks once, the first time a lane with an `implement` phase starts:
+
+```json
+"tests": {
+  "full":    "npm test -- --reporter=junit --outputFile=.senior-dev/junit.xml",
+  "related": "npx vitest related --run {files}",
+  "one":     "npx vitest run {test} --reporter=junit --outputFile=.senior-dev/junit.xml",
+  "report":  ".senior-dev/junit.xml",
+  "setup":   "ln -s \"$SENIOR_DEV_MAIN/node_modules\" node_modules",
+  "build":   "npm run build"
+}
+```
+
+Only `full` is required. `state-cli test` records each run with the tree it
+covered. The gate wants one green full run; after that, later changes need
+only their affected tests, checked at push / PR creation. A failure outside
+your diff can be proven pre-existing (`test --preexisting <id>`, needs `one`
+and `report`), and then the operator can `/senior-dev:ship <reason>` past it.
+A test that fails, passes and fails again stops the loop with `CONTRADICTION`
+until the operator says which behaviour is right. Declining the runner
+(`set-tests --none`) keeps the 0.3.1 `tests-green` behaviour. Known ceilings
+are in the [design spec](docs/superpowers/specs/2026-09-30-v0.4-friction-pass-design.md).
+
 ## Universal enforcement (the guard)
 
 The gates don't have to live only in Claude Code. On first run in a repo the
@@ -176,6 +202,11 @@ and `claude plugin update senior-dev@nzshrimper-senior-dev`, restart.</sub>
 | `state-cli skills-config set-models [--lane <lane>] --steps 'phase=<claude>[/<codex>],...'` | Set tiers; `/<codex>` sets the effort only |
 | `state-cli dispatch --phase <p> [--claude <tier> --reason "<signal>"]` | Record a subagent dispatch; raises need a reason, a reason without a raise is refused, lowering is refused |
 | `state-cli review ... --overrule --reason "<text>"` | Operator-confirmed overrule of one reviewer's rejection after adjudication |
+| `/senior-dev:ship <reason>` | Operator-only: waive test failures proven to pre-exist on the base commit (logged; reviews, verify and docs still gate) |
+| `state-cli skills-config set-tests --full "<cmd>" [--related --one --report --setup --build]` \| `--none` | Configure the test runner for this repo (or opt out) |
+| `state-cli test --affected [files] \| --one <id> \| --full \| --build \| --preexisting <id> \| --resolve <id> --reason "<why>"` | Run and record tests |
+| `state-cli reclassify --type <t> --reason "<why>" [--by-operator]` | Change the session's lane; lowering needs the operator's yes |
+| `state-cli finish --no-change "<reason>"` | Close a session that changed nothing |
 | `/senior-dev:guard [install\|status\|uninstall]` | Manage the universal enforcement git hooks |
 | `/senior-dev:finish` | Final Codex pass, sweep, archive, evidence summary |
 
@@ -189,8 +220,9 @@ are archived to `.senior-dev/history/`.
 ## Companion plugins
 
 Designed to drive: [superpowers](https://github.com/obra/superpowers) (process
-skills), the OpenAI codex plugin (read-only review lanes), and the built-in
-`/code-review` + `verify` skills. Missing companions degrade gracefully and are
+skills, including review and verification), the OpenAI codex plugin
+(read-only review lanes), and `/code-review` where a skill of that name is
+installed. Missing companions degrade gracefully and are
 reported, never silently skipped — the conductor points you at the exact install
 and offers to run it.
 
