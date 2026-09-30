@@ -116,8 +116,9 @@ test('green run stamps testsGreenAt; --build records kind build without parsing'
   assert.equal(cli(t.dir, ['test', '--build']).status, 0);
   let s = readState(t.dir);
   assert.equal(s.testRuns[0].kind, 'build'); assert.equal(s.testRuns[0].failures, null);
-  assert.ok(s.phases.implement.testsGreenAt);
+  assert.equal(s.phases.implement?.testsGreenAt, undefined); // a green build is not a green test run
   assert.equal(cli(t.dir, ['test', '--full']).status, 0);
+  assert.ok(readState(t.dir).phases.implement.testsGreenAt);
   s = readState(t.dir);
   assert.equal(s.testRuns[1].id, 2);
 });
@@ -231,4 +232,24 @@ test('no tests config refuses', () => {
   assert.match(r.out, /senior-dev: no tests config - run skills-config set-tests, or use tests-green/);
   writeSkillsConfig(dir, { version: 4, source: 'superpowers', shared: false, tests: { none: true } });
   assert.equal(cli(dir, ['test', '--full']).status, 1);
+});
+
+test('files a run writes do not enter its tree', () => {
+  const t = setup({ tests: { report: 'out/junit.xml' } });
+  const p = join(t.aux, 'fake.mjs');
+  writeFileSync(p, readFileSync(p, 'utf8').replaceAll('.senior-dev', 'out'));
+  t.setReport(xml([pass('s', 'ok')]));
+  assert.equal(cli(t.dir, ['test', '--full']).status, 0);
+  assert.equal(existsSync(join(t.dir, 'out', 'junit.xml')), true);
+  const run = readState(t.dir).testRuns[0];
+  assert.deepEqual(run.failures, []);
+  assert.equal(run.tree, g(t.dir, 'rev-parse', 'HEAD^{tree}'));
+});
+
+test('non-ASCII changed files reach {files} unquoted', () => {
+  const t = setup();
+  writeFileSync(join(t.dir, 'é.js'), 'x');
+  assert.equal(cli(t.dir, ['test', '--affected']).status, 0);
+  assert.deepEqual(readState(t.dir).testRuns[0].files, ['é.js']);
+  assert.ok(t.markers().at(-1).endsWith('REL é.js'));
 });

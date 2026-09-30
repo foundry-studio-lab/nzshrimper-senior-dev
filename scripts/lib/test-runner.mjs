@@ -62,9 +62,10 @@ function headSha(cwd) {
 }
 
 function changedFiles(cwd, base) {
-  const list = (args) => gitOut(cwd, args).split('\n').filter(Boolean);
-  const out = new Set(list(['ls-files', '--others', '--exclude-standard']));
-  for (const f of list(['diff', '--name-only', '--diff-filter=d', base])) out.add(f);
+  // -z: git otherwise C-quotes non-ASCII paths.
+  const list = (args) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).split('\0').filter(Boolean);
+  const out = new Set(list(['ls-files', '-z', '--others', '--exclude-standard']));
+  for (const f of list(['diff', '-z', '--name-only', '--diff-filter=d', base])) out.add(f);
   return [...out].sort();
 }
 
@@ -113,8 +114,11 @@ export function runTest({ repoRoot, cwd, state, cfg, kind, files, test }) {
   const report = t.report && kind !== 'build' ? resolve(cwd, t.report) : null;
   let exit = 0;
   let parsed = null;
+  if (report) rmSync(report, { force: true });
+  // Snapshot head/tree BEFORE the command: files it writes must not enter the tree.
+  const head = headSha(cwd);
+  const tree = wouldCommitTree(cwd);
   if (!nothing) {
-    if (report) rmSync(report, { force: true });
     const r = spawnSync('sh', ['-c', cmd], { cwd, stdio: 'inherit', env: process.env });
     exit = r.status ?? 1;
     if (report) {
@@ -131,14 +135,14 @@ export function runTest({ repoRoot, cwd, state, cfg, kind, files, test }) {
     test: test ?? null,
     exit,
     failures: parsed ? parsed.failed : null,
-    head: headSha(cwd),
-    tree: wouldCommitTree(cwd),
+    head,
+    tree,
     phase,
     sinceFull: fulls.length ? fulls[fulls.length - 1].id : null,
     at,
   };
   state.testRuns.push(run);
-  if (exit === 0) state.phases[phase] = { ...(state.phases[phase] || { status: 'in_progress' }), testsGreenAt: at };
+  if (exit === 0 && kind !== 'build') state.phases[phase] = { ...(state.phases[phase] || { status: 'in_progress' }), testsGreenAt: at };
 
   state.testHistory = state.testHistory || {};
   state.contradictions = state.contradictions || [];
