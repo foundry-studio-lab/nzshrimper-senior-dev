@@ -1,8 +1,8 @@
 // `state-cli test`: run the configured commands, record every run in state.
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, copyFileSync, existsSync, rmSync, readFileSync, statSync, utimesSync } from 'node:fs';
+import { mkdtempSync, copyFileSync, existsSync, rmSync, readFileSync, statSync, utimesSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join, resolve, sep } from 'node:path';
 import { currentPhase, headTree } from './state.mjs';
 
 export { headTree };
@@ -26,16 +26,20 @@ const attr = (tag, k) => {
 };
 
 export function parseJUnit(xmlText) {
-  const passed = [], failed = [];
+  const passed = [], failed = [], skipped = [], files = {};
   const re = /<testcase\b([^>]*?)(\/>|>([\s\S]*?)<\/testcase>)/g;
   let m;
   while ((m = re.exec(xmlText))) {
     const id = `${attr(m[1], 'classname')} > ${attr(m[1], 'name')}`;
     const body = m[3] || '';
-    if (/<(failure|error)\b/.test(body)) failed.push(id);
-    else if (!/<skipped\b/.test(body)) passed.push(id);
+    if (/<(failure|error)\b/.test(body)) {
+      failed.push(id);
+      // The `file` attribute (node's reporter) tells same-named tests apart.
+      if (/\sfile="/.test(m[1])) (files[id] = files[id] || []).push(attr(m[1], 'file'));
+    } else if (/<skipped\b/.test(body)) skipped.push(id);
+    else passed.push(id);
   }
-  return { passed, failed };
+  return { passed, failed, skipped, files };
 }
 
 const gitOut = (cwd, args, env) => execFileSync('git', args, {
@@ -210,6 +214,7 @@ export function provePreexisting({ cwd, state, cfg, test }) {
   const tree = wouldCommitTree(cwd);
 
   const tmp = mkdtempSync(join(tmpdir(), 'sd-proof-'));
+  const tmpReal = realpathSync(tmp); // reporters write realpaths (/private/var on macOS)
   let onBase;
   let added = false;
   try {
@@ -232,15 +237,26 @@ export function provePreexisting({ cwd, state, cfg, test }) {
   const where = (p, id) => (!p ? 'no parseable report' : p.failed.includes(id) ? 'failed' : p.passed.includes(id) ? 'passed' : 'test not in report');
   // Two testcases sharing an id (node's reporter gives every file classname
   // "test") could let one test's base failure prove another's: never prove.
-  const count = (p, id) => (p ? [...p.failed, ...p.passed].filter((x) => x === id).length : 0);
+  const count = (p, id) => (p ? [...p.failed, ...p.passed, ...(p.skipped || [])].filter((x) => x === id).length : 0);
   const shared = [['HEAD', onHead.parsed], ['base', onBase.parsed]].find(([, p]) => count(p, test) > 1);
   const h = where(onHead.parsed, test);
   const b = where(onBase.parsed, test);
   let proven = false;
   let reason;
-  if (shared) reason = `ambiguous id: ${count(shared[1], test)} testcases in the ${shared[0]} report share it - make test names unique or narrow the 'one' command`;
+  // Same id from a different file (a test deleted on base, a same-named one
+  // added on HEAD) is a different test. Paths are compared per checkout.
+  const rel = (f, roots) => {
+    const r = roots.find((x) => f.startsWith(x + sep));
+    return r ? f.slice(r.length + 1) : f;
+  };
+  const fileOf = (p, roots) => (p?.files?.[test] || []).map((f) => rel(f, roots)).join(',');
+  const real = (p) => { try { return realpathSync(p); } catch { return p; } };
+  const hf = fileOf(onHead.parsed, [cwd, real(cwd)]);
+  const bf = fileOf(onBase.parsed, [tmp, tmpReal]);
+  if (shared) reason = `ambiguous id: ${count(shared[1], test)} testcases in the ${shared[0]} report share it - make test names unique`;
   else if (h === 'passed') reason = 'passes on HEAD - nothing to prove';
   else if (h !== 'failed') reason = `absent from the HEAD report: ${h} (exit ${onHead.exit})`;
+  else if (b === 'failed' && hf && bf && hf !== bf) reason = `different test: fails from ${bf} on base, ${hf} on HEAD`;
   else if (b === 'failed') { proven = true; reason = `fails on base ${sha7} and HEAD`; }
   else if (b === 'passed') reason = `caused by this change: passes on base ${sha7}`;
   else reason = `absent from the base report: ${b} (exit ${onBase.exit})`;

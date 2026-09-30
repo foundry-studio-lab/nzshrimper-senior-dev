@@ -73,7 +73,18 @@ test('parseJUnit: pass, failure, error, skipped, entities', () => {
   assert.deepEqual(parseJUnit(x), {
     passed: ['s > ok', `s > a & b <c> "d" 'e'`],
     failed: ['s > bad', 's > err'],
+    skipped: ['s > sk'],
+    files: {},
   });
+});
+
+test('parseJUnit records the file of failing testcases, not classname', () => {
+  const x = xml([
+    '<testcase name="t" classname="test" file="/r/test/a.test.mjs"><failure message="x"/></testcase>',
+    '<testcase name="t" classname="test" file="/r/test/b.test.mjs"><failure message="x"/></testcase>',
+    '<testcase name="ok" classname="test" file="/r/test/a.test.mjs"/>',
+  ]);
+  assert.deepEqual(parseJUnit(x).files, { 'test > t': ['/r/test/a.test.mjs', '/r/test/b.test.mjs'] });
 });
 
 test('wouldCommitTree matches HEAD tree after committing and never touches the real index', () => {

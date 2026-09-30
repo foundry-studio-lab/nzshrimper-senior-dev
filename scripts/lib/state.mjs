@@ -307,6 +307,12 @@ export function testBlockers(state, ctx = {}) {
     if (F.passedCount === 0) {
       return [`full test run #${F.id} passed no tests - the runner may not have run the suite; fix the full command, then state-cli test --full`];
     }
+    // One proof covers one test: a failing id listed twice is two tests, and
+    // narrowing the `one` command could prove the wrong one.
+    const dup = [...new Set(F.failures.filter((t, i) => F.failures.indexOf(t) !== i))];
+    if (dup.length) {
+      return [`full test run #${F.id} has ambiguous failing ids: ${dup.join(', ')} - give those tests unique names, then state-cli test --full`];
+    }
     const proven = new Set(runs.filter((r) => r.kind === 'preexisting' && r.proven === true).map((r) => r.test));
     const unproven = F.failures.filter((t) => !proven.has(t));
     if (unproven.length) {

@@ -94,6 +94,17 @@ test('refuses when the full run passed no tests (runner may not have run the sui
   assert.equal(readState(dir).ship, undefined);
 });
 
+test('refuses a full run whose failing ids repeat (one proof must not waive two tests)', () => {
+  // Narrowing the `one` command can prove one of two same-named failures; the
+  // duplicate in the full run must still block the waiver of both.
+  const { dir, tree, set } = setup();
+  set([{ ...red(1, tree, ['a > x', 'a > x']), passedCount: 1 }, pre(2, 'a > x', tree)]);
+  const r = ship(dir);
+  assert.equal(r.status, 1);
+  assert.match(r.out, /full test run #1 has ambiguous failing ids: a > x/);
+  assert.equal(readState(dir).ship, undefined);
+});
+
 test('refuses when the current HEAD tree is not covered', () => {
   const { dir, set } = setup();
   set([red(1, 'other-tree'), pre(2, 'a > x', 'other-tree')]);

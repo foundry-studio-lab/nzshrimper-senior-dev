@@ -36,8 +36,10 @@ clustering in five places; each is now a first-class, logged operation.
 - `test --preexisting <id>` proves a failure also fails on the session's base
   commit (temporary worktree, JUnit report required). Never proven by a crash,
   nor when two testcases in either report share the id (node's reporter uses
-  classname `test` for every file, so same-named tests collide). A red full
-  run whose report passed no tests (a misconfigured runner) cannot be waived.
+  classname `test` for every file, so same-named tests collide), nor when the
+  failure comes from a different file on base than on HEAD. A red full run
+  whose failing ids repeat, or whose report passed no tests (a misconfigured
+  runner), cannot be waived.
 - `CONTRADICTION` stop: a test that fails, passes, then fails again in a
   phase halts the fix loop until the operator answers (`test --resolve`).
 - `/senior-dev:ship <reason>` (operator-only) waives proven pre-existing

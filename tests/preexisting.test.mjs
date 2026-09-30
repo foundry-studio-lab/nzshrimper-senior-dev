@@ -76,6 +76,35 @@ test('an id shared by two testcases in the base report is never proven (ambiguou
   assert.match(lastRun(s.dir).reason, /^ambiguous id: 2 testcases in the base report share it/);
 });
 
+test('a skipped twin counts toward ambiguity (fail+skip swapping between base and HEAD)', () => {
+  const skipped = '<testcase classname="a.test.js" name="X"><skipped/></testcase>';
+  const s = setup({ base: { report: xml([failing('X'), skipped]), exit: 1 }, head: { report: xml([skipped, failing('X')]), exit: 1 } });
+  const r = cli(s.dir, ['test', '--preexisting', ID]);
+  assert.equal(r.status, 1, r.out);
+  assert.equal(lastRun(s.dir).proven, false);
+  assert.match(lastRun(s.dir).reason, /^ambiguous id: 2 testcases in the HEAD report share it/);
+});
+
+test('a same id failing from a different file on base is never proven', () => {
+  // A test deleted on base and a same-named test added elsewhere on HEAD: the
+  // id matches but it is not the same test. Files are compared relative to
+  // each checkout (the reporter writes absolute paths).
+  const tc = (f) => `<testcase classname="a.test.js" name="X" file="${f}"><failure message="x"/></testcase>`;
+  const s = setup({ base: { report: xml([tc('/somewhere/base/test/a.test.mjs')]), exit: 1 }, head: { report: xml([tc('/elsewhere/head/test/b.test.mjs')]), exit: 1 } });
+  const r = cli(s.dir, ['test', '--preexisting', ID]);
+  assert.equal(r.status, 1, r.out);
+  assert.equal(lastRun(s.dir).proven, false);
+  assert.match(lastRun(s.dir).reason, /^different test: fails from \S*a\.test\.mjs on base, \S*b\.test\.mjs on HEAD/);
+});
+
+test('the same file on base and HEAD still proves (file attribute present)', () => {
+  const tc = `<testcase classname="a.test.js" name="X" file="test/a.test.mjs"><failure message="x"/></testcase>`;
+  const s = setup({ base: { report: xml([tc]), exit: 1 }, head: { report: xml([tc]), exit: 1 } });
+  const r = cli(s.dir, ['test', '--preexisting', ID]);
+  assert.equal(r.status, 0, r.out);
+  assert.equal(lastRun(s.dir).proven, true);
+});
+
 test('fails on base and HEAD -> proven', () => {
   const s = setup({ base: { report: xml([failing('X')]), exit: 1 }, head: { report: xml([failing('X'), pass('Y')]), exit: 1 } });
   const r = cli(s.dir, ['test', '--preexisting', ID]);
