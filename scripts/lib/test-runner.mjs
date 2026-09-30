@@ -80,6 +80,25 @@ function contradicts(oks) {
   return false;
 }
 
+// Run one shell command, parsing `report` (deleted first) when given.
+function exec(cmd, cwd, report, env) {
+  if (report) rmSync(report, { force: true });
+  const r = spawnSync('sh', ['-c', cmd], { cwd, stdio: 'inherit', env: { ...process.env, ...env } });
+  let parsed = null;
+  if (report) {
+    try { parsed = parseJUnit(readFileSync(report, 'utf8')); } catch { parsed = null; }
+  }
+  return { exit: r.status ?? 1, parsed };
+}
+
+function runBase(state) {
+  const fulls = state.testRuns.filter((r) => r.kind === 'full');
+  return {
+    id: 1 + state.testRuns.reduce((m, r) => Math.max(m, r.id), 0),
+    sinceFull: fulls.length ? fulls[fulls.length - 1].id : null,
+  };
+}
+
 const line = (t) => `CONTRADICTION: ${t} has failed, passed, and failed again this phase`;
 
 export function runTest({ repoRoot, cwd, state, cfg, kind, files, test }) {
@@ -112,34 +131,15 @@ export function runTest({ repoRoot, cwd, state, cfg, kind, files, test }) {
   const nothing = kind === 'affected' && cmdKind === 'affected' && runFiles.length === 0;
   const cmd = nothing ? '' : fill(template, { files: runFiles, test });
   const report = t.report && kind !== 'build' ? resolve(cwd, t.report) : null;
-  let exit = 0;
-  let parsed = null;
   if (report) rmSync(report, { force: true });
   // Snapshot head/tree BEFORE the command: files it writes must not enter the tree.
   const head = headSha(cwd);
   const tree = wouldCommitTree(cwd);
-  if (!nothing) {
-    const r = spawnSync('sh', ['-c', cmd], { cwd, stdio: 'inherit', env: process.env });
-    exit = r.status ?? 1;
-    if (report) {
-      try { parsed = parseJUnit(readFileSync(report, 'utf8')); } catch { parsed = null; }
-    }
-  }
-  const fulls = state.testRuns.filter((r) => r.kind === 'full');
+  const { exit, parsed } = nothing ? { exit: 0, parsed: null } : exec(cmd, cwd, report);
   const at = new Date().toISOString();
   const run = {
-    id: 1 + state.testRuns.reduce((m, r) => Math.max(m, r.id), 0),
-    kind: cmdKind,
-    cmd,
-    files: runFiles,
-    test: test ?? null,
-    exit,
-    failures: parsed ? parsed.failed : null,
-    head,
-    tree,
-    phase,
-    sinceFull: fulls.length ? fulls[fulls.length - 1].id : null,
-    at,
+    ...runBase(state), kind: cmdKind, cmd, files: runFiles, test: test ?? null, exit,
+    failures: parsed ? parsed.failed : null, head, tree, phase, at,
   };
   state.testRuns.push(run);
   if (exit === 0 && kind !== 'build') state.phases[phase] = { ...(state.phases[phase] || { status: 'in_progress' }), testsGreenAt: at };
@@ -161,6 +161,71 @@ export function runTest({ repoRoot, cwd, state, cfg, kind, files, test }) {
     }
   }
   return { run, exit };
+}
+
+function baseCommit(cwd, state) {
+  if (state.baseHead) return state.baseHead;
+  let def = 'main';
+  try { def = gitOut(cwd, ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD']).replace(/^origin\//, ''); } catch { /* keep main */ }
+  try { return gitOut(cwd, ['merge-base', 'HEAD', def]); } catch { throw new Error(`no base commit: session has no baseHead and 'git merge-base HEAD ${def}' failed`); }
+}
+
+// Prove `test` fails on the base commit too. Only a FAILED entry in both
+// reports proves it; a missing test (crash, deps, new test) never does.
+// `cwd` is the run checkout's root (SENIOR_DEV_MAIN for setup).
+export function provePreexisting({ cwd, state, cfg, test }) {
+  const t = cfg.tests;
+  if (!t.one) throw new Error("test --preexisting needs a 'one' command - run skills-config set-tests --one");
+  if (!t.report) throw new Error("test --preexisting needs a 'report' path - run skills-config set-tests --report");
+  const phase = currentPhase(state);
+  if (!phase) throw new Error('all phases already done');
+  state.testRuns = state.testRuns || [];
+  const base = baseCommit(cwd, state);
+  const sha7 = base.slice(0, 7);
+  const cmd = fill(t.one, { test });
+  const headReport = resolve(cwd, t.report);
+  rmSync(headReport, { force: true });
+  const head = headSha(cwd);
+  const tree = wouldCommitTree(cwd);
+
+  const tmp = mkdtempSync(join(tmpdir(), 'sd-proof-'));
+  let onBase;
+  let added = false;
+  try {
+    gitOut(cwd, ['worktree', 'add', '--detach', tmp, base]);
+    added = true;
+    if (t.setup) {
+      const s = spawnSync('sh', ['-c', t.setup], { cwd: tmp, stdio: 'inherit', env: { ...process.env, SENIOR_DEV_MAIN: cwd } });
+      if (s.status !== 0) throw new Error(`setup failed in the proof worktree (exit ${s.status ?? 'signal'})`);
+    }
+    onBase = exec(cmd, tmp, resolve(tmp, t.report));
+  } finally {
+    if (added) {
+      try { gitOut(cwd, ['worktree', 'remove', '--force', tmp]); } catch { /* warned below */ }
+      try { gitOut(cwd, ['worktree', 'prune']); } catch { /* warned below */ }
+    } else rmSync(tmp, { recursive: true, force: true });
+    if (existsSync(tmp)) console.error(`senior-dev: warning: proof worktree left behind at ${tmp}`);
+  }
+  const onHead = exec(cmd, cwd, headReport);
+
+  const where = (p, id) => (!p ? 'no parseable report' : p.failed.includes(id) ? 'failed' : p.passed.includes(id) ? 'passed' : 'test not in report');
+  const h = where(onHead.parsed, test);
+  const b = where(onBase.parsed, test);
+  let proven = false;
+  let reason;
+  if (h === 'passed') reason = 'passes on HEAD - nothing to prove';
+  else if (h !== 'failed') reason = `absent from the HEAD report: ${h} (exit ${onHead.exit})`;
+  else if (b === 'failed') { proven = true; reason = `fails on base ${sha7} and HEAD`; }
+  else if (b === 'passed') reason = `caused by this change: passes on base ${sha7}`;
+  else reason = `absent from the base report: ${b} (exit ${onBase.exit})`;
+
+  const run = {
+    ...runBase(state), kind: 'preexisting', cmd, files: [], test, exit: onHead.exit,
+    failures: onHead.parsed ? onHead.parsed.failed : null, head, tree, phase,
+    at: new Date().toISOString(), proven, reason, base,
+  };
+  state.testRuns.push(run);
+  return { proven, reason, run };
 }
 
 // Reprint the stop line for every unresolved contradiction (--one / --affected)

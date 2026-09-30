@@ -15,7 +15,7 @@ import {
   stampVersion, validTests, resolveModel, MODEL_PHASES, CLAUDE_TIERS, CODEX_EFFORTS, TIER_RANK,
 } from './lib/state.mjs';
 import { codexUpdateNotice } from './lib/codex-check.mjs';
-import { runTest, reprintContradictions, resolveContradiction } from './lib/test-runner.mjs';
+import { runTest, provePreexisting, reprintContradictions, resolveContradiction } from './lib/test-runner.mjs';
 
 function fail(msg) {
   console.error(`senior-dev: ${msg}`);
@@ -254,7 +254,7 @@ switch (cmd) {
   }
   case 'test': {
     const state = requireSession(repoRoot);
-    requireValues('test', flags, ['one', 'resolve', 'reason']);
+    requireValues('test', flags, ['one', 'preexisting', 'resolve', 'reason']);
     const cfg = readSkillsConfig(repoRoot);
     if (!cfg?.tests || cfg.tests.none) fail('no tests config - run skills-config set-tests, or use tests-green');
     if (flags.resolve !== undefined) {
@@ -264,8 +264,8 @@ switch (cmd) {
       console.log(`contradiction resolved: ${flags.resolve}`);
       break;
     }
-    const modes = ['affected', 'one', 'full', 'build'].filter((m) => flags[m] !== undefined);
-    if (modes.length !== 1) fail('test needs exactly one of --affected [files...] | --one <id> | --full | --build | --resolve <id> --reason "<text>"');
+    const modes = ['affected', 'one', 'full', 'build', 'preexisting'].filter((m) => flags[m] !== undefined);
+    if (modes.length !== 1) fail('test needs exactly one of --affected [files...] | --one <id> | --full | --build | --preexisting <id> | --resolve <id> --reason "<text>"');
     const kind = modes[0];
     // parseFlags hands the first token after --affected to it as a value; every
     // non-flag token after --affected is a file.
@@ -273,6 +273,14 @@ switch (cmd) {
     let cwd;
     try { cwd = execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); }
     catch { fail('not inside a git repository'); }
+    if (kind === 'preexisting') {
+      let proof;
+      try { proof = provePreexisting({ cwd, state, cfg, test: flags.preexisting }); }
+      catch (e) { fail(e.message); }
+      writeState(repoRoot, state);
+      console.log(`preexisting ${flags.preexisting}: ${proof.proven ? 'PROVEN' : 'NOT PROVEN'} - ${proof.reason}`);
+      process.exit(proof.proven ? 0 : 1);
+    }
     let result;
     try { result = runTest({ repoRoot, cwd, state, cfg, kind, files, test: kind === 'one' ? flags.one : undefined }); }
     catch (e) { fail(e.message); }
