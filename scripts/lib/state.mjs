@@ -26,6 +26,9 @@ export const DOCS_GATE = {
   'investigation': {},
 };
 
+// How much process a lane demands; `reclassify` needs the operator to lower it.
+export const LANE_RANK = { investigation: 0, 'docs-only': 1, 'quick-fix': 2, 'bug-fix': 3, refactor: 3, feature: 4 };
+
 // Lanes where a recorded review is not demanded before integration.
 const REVIEW_EXEMPT = new Set(['docs-only', 'investigation']);
 

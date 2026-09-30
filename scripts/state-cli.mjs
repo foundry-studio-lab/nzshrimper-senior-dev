@@ -9,7 +9,7 @@ import {
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  CHAINS, DOCS_GATE, findRepoRoot, readState, writeState, statePath,
+  CHAINS, DOCS_GATE, LANE_RANK, findRepoRoot, readState, writeState, statePath,
   hasActiveSession, currentPhase, latestVerdicts, latestReview, openGateItems, ensureExcluded,
   VALID_SOURCES, readSkillsConfig, writeSkillsConfig, resolveConfiguredSkill, normalizeLaneValue,
   stampVersion, validTests, headTree, testBlockers, resolveModel, MODEL_PHASES, CLAUDE_TIERS, CODEX_EFFORTS, TIER_RANK,
@@ -504,6 +504,29 @@ switch (cmd) {
     }
     break;
   }
+  case 'reclassify': {
+    const state = requireSession(repoRoot);
+    requireValues('reclassify', flags, ['type', 'reason']);
+    if (flags['by-operator'] !== undefined && flags['by-operator'] !== true) fail('reclassify --by-operator does not take a value');
+    if (!CHAINS[flags.type]) fail(`reclassify needs --type, one of: ${Object.keys(CHAINS).join(', ')}`);
+    if (!flags.reason || !flags.reason.trim()) fail('reclassify needs --reason "<why>"');
+    if (flags.type === state.type) fail(`session is already ${state.type}`);
+    const byOperator = flags['by-operator'] === true;
+    if (LANE_RANK[flags.type] < LANE_RANK[state.type] && !byOperator) {
+      fail(`reclassifying ${state.type} -> ${flags.type} lowers the lane; it needs the operator's yes (--by-operator)`);
+    }
+    const from = state.type;
+    const fresh = DOCS_GATE[flags.type];
+    state.docsGate = { ...fresh, ...Object.fromEntries(Object.keys(fresh).filter((k) => state.docsGate?.[k] === true).map((k) => [k, true])) };
+    state.type = flags.type;
+    state.chain = CHAINS[flags.type];
+    state.reclassifications = state.reclassifications || [];
+    state.reclassifications.push({ from, to: flags.type, reason: flags.reason, byOperator, at: new Date().toISOString() });
+    writeState(repoRoot, state);
+    console.log(`reclassified: ${from} -> ${flags.type}`);
+    console.log(`chain: ${state.chain.join(' -> ')}`);
+    break;
+  }
   case 'scratch': {
     const state = requireSession(repoRoot);
     requireValues('scratch', flags, ['add']);
@@ -525,7 +548,8 @@ switch (cmd) {
     console.log(`# senior-dev session\n`);
     console.log(`task:   ${state.task}`);
     console.log(`type:   ${state.type}`);
-    console.log(`phase:  ${currentPhase(state) || '(all done)'}\n`);
+    for (const r of state.reclassifications || []) console.log(`reclassified: ${r.from} -> ${r.to} (${r.reason})${r.byOperator ? ' [operator]' : ''}`);
+    console.log(`phase: ${currentPhase(state) || '(all done)'}\n`);
     if (state.waiting) console.log(`WAITING on: ${state.waiting.on} (since ${state.waiting.at})\n`);
     if (state.skillSource) {
       console.log(`skill source: ${state.skillSource.source}`);
