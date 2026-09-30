@@ -103,6 +103,7 @@ test('wouldCommitTree sees a same-size edit git itself only catches as racily cl
   g(dir, 'init', '-q');
   g(dir, 'config', 'user.email', 't@t'); g(dir, 'config', 'user.name', 't');
   g(dir, 'config', 'core.trustctime', 'false');
+  g(dir, 'config', 'core.fsmonitor', 'false');
   const a = join(dir, 'a.js');
   const old = new Date(Date.now() - 3600_000);
   writeFileSync(a, '1'); utimesSync(a, old, old);
@@ -314,6 +315,23 @@ test('F2: unchanged tree after a full run runs nothing and records green', () =>
   const run = readState(t.dir).testRuns[1];
   assert.equal(run.kind, 'affected'); assert.deepEqual(run.files, []); assert.equal(run.exit, 0);
   assert.equal(t.markers().length, 1);
+});
+
+test('N1: unchanged tree after a RED full run runs full again, not "nothing to run"', () => {
+  const t = setup();
+  t.setExit(1);
+  assert.equal(cli(t.dir, ['test', '--full']).status, 1);
+  assert.equal(cli(t.dir, ['test', '--affected']).status, 1);
+  assert.equal(readState(t.dir).testRuns[1].kind, 'full');
+  assert.equal(t.markers().length, 2);
+});
+
+test('N3: an in-repo report path starting with ".." is still warned about', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'sd-tr-dots-'));
+  g(dir, 'init', '-q');
+  const r = spawnSync('node', [CLI, 'skills-config', 'set-tests', '--full', 'x', '--report', '..cache/x.xml'],
+    { cwd: dir, encoding: 'utf8', env: { ...process.env, SENIOR_DEV_OFFLINE: '1' } });
+  assert.ok(r.stderr.includes('not git-ignored'), r.stderr);
 });
 
 test('F2: empty file list at a tree other than the full run\'s runs full', () => {

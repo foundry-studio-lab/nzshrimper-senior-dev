@@ -151,7 +151,7 @@ export function runTest({ repoRoot, cwd, state, cfg, kind, files, test }) {
   let nothing = false;
   if (kind === 'affected' && cmdKind === 'affected' && runFiles.length === 0) {
     const F = last('full');
-    nothing = F ? F.tree === tree : typeof state.baseHead === 'string';
+    nothing = F ? F.tree === tree && F.exit === 0 : typeof state.baseHead === 'string';
     if (!nothing) cmdKind = 'full';
   }
   if (cmdKind === 'full') template = t.full;

@@ -6,7 +6,7 @@ import {
   existsSync, mkdirSync, renameSync, readFileSync, writeFileSync,
   copyFileSync, chmodSync, unlinkSync,
 } from 'node:fs';
-import { join, dirname, relative, resolve, isAbsolute } from 'node:path';
+import { join, dirname, relative, resolve, isAbsolute, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   CHAINS, DOCS_GATE, LANE_RANK, isLane, findRepoRoot, readState, writeState, statePath,
@@ -922,7 +922,7 @@ switch (cmd) {
       ensureExcluded(repoRoot);
       console.log(`tests config: ${JSON.stringify(tests)}`);
       const rel = tests.report ? relative(repoRoot, resolve(repoRoot, tests.report)) : '';
-      if (rel && rel !== '.senior-dev/junit.xml' && !rel.startsWith('..') && !isAbsolute(rel)) {
+      if (rel && rel !== '.senior-dev/junit.xml' && rel !== '..' && !rel.startsWith('../') && !rel.startsWith(`..${sep}`) && !isAbsolute(rel)) {
         try { execFileSync('git', ['check-ignore', '-q', rel], { cwd: repoRoot, stdio: 'ignore' }); }
         catch { console.error(`senior-dev: report path ${tests.report} is not git-ignored - add it to .gitignore so it is never committed`); }
       }
