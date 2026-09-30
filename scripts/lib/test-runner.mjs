@@ -61,12 +61,15 @@ function headSha(cwd) {
   try { return gitOut(cwd, ['rev-parse', 'HEAD']); } catch { return null; }
 }
 
+// Files changed since `base` (plus untracked), and whether any was deleted.
+// --no-renames: a renamed-away path is a deletion (its importers break).
 function changedFiles(cwd, base) {
   // -z: git otherwise C-quotes non-ASCII paths.
   const list = (args) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).split('\0').filter(Boolean);
   const out = new Set(list(['ls-files', '-z', '--others', '--exclude-standard']));
-  for (const f of list(['diff', '-z', '--name-only', '--diff-filter=d', base])) out.add(f);
-  return [...out].sort();
+  for (const f of list(['diff', '-z', '--name-only', '--no-renames', '--diff-filter=d', base])) out.add(f);
+  const deleted = list(['diff', '-z', '--name-only', '--no-renames', '--diff-filter=D', base]).length > 0;
+  return { files: [...out], deleted };
 }
 
 // fail -> pass -> fail as a subsequence of the outcomes.
@@ -111,11 +114,16 @@ export function runTest({ repoRoot, cwd, state, cfg, kind, files, test }) {
   let cmdKind = kind;
   let runFiles = [];
   let template;
+  let deleted = false;
   if (kind === 'affected') {
     if (!t.related) cmdKind = 'full';
     else {
-      runFiles = files && files.length ? [...files] : changedFiles(cwd, last('full')?.head || state.baseHead || 'HEAD');
+      const changed = changedFiles(cwd, last('full')?.head || state.baseHead || 'HEAD');
+      deleted = changed.deleted;
+      // Explicit files add to the changed list, never replace it.
+      runFiles = [...new Set([...(files || []), ...changed.files])].sort();
       template = t.related;
+      if (deleted) { cmdKind = 'full'; runFiles = []; }
     }
   }
   if (kind === 'one') {
@@ -126,15 +134,22 @@ export function runTest({ repoRoot, cwd, state, cfg, kind, files, test }) {
     if (!t.build) throw new Error("no 'build' command configured - run skills-config set-tests --build");
     template = t.build;
   }
-  if (cmdKind === 'full') template = t.full;
-
-  const nothing = kind === 'affected' && cmdKind === 'affected' && runFiles.length === 0;
-  const cmd = nothing ? '' : fill(template, { files: runFiles, test });
   const report = t.report && kind !== 'build' ? resolve(cwd, t.report) : null;
   if (report) rmSync(report, { force: true });
   // Snapshot head/tree BEFORE the command: files it writes must not enter the tree.
   const head = headSha(cwd);
   const tree = wouldCommitTree(cwd);
+
+  // An empty list is "nothing to run" only at the latest full run's tree, or
+  // with no full run yet when nothing changed since baseHead; else run full.
+  let nothing = false;
+  if (kind === 'affected' && cmdKind === 'affected' && runFiles.length === 0) {
+    const F = last('full');
+    nothing = F ? F.tree === tree : typeof state.baseHead === 'string';
+    if (!nothing) cmdKind = 'full';
+  }
+  if (cmdKind === 'full') template = t.full;
+  const cmd = nothing ? '' : fill(template, { files: runFiles, test });
   const { exit, parsed } = nothing ? { exit: 0, parsed: null } : exec(cmd, cwd, report);
   const at = new Date().toISOString();
   const run = {

@@ -138,7 +138,6 @@ test('--affected defaults to files changed since the last full run', () => {
   const t = setup();
   assert.equal(cli(t.dir, ['test', '--full']).status, 0);
   writeFileSync(join(t.dir, 'a.js'), '2');
-  g(t.dir, 'rm', '-q', 'b.js');
   writeFileSync(join(t.dir, 'c.js'), 'c');
   const r = cli(t.dir, ['test', '--affected']);
   assert.equal(r.status, 0, r.out);
@@ -252,4 +251,50 @@ test('non-ASCII changed files reach {files} unquoted', () => {
   assert.equal(cli(t.dir, ['test', '--affected']).status, 0);
   assert.deepEqual(readState(t.dir).testRuns[0].files, ['é.js']);
   assert.ok(t.markers().at(-1).endsWith('REL é.js'));
+});
+
+// ---- F2 / F4 ----
+test('F2: a deletion-only change runs full and records kind full', () => {
+  const t = setup();
+  rmSync(join(t.dir, 'b.js'));
+  assert.equal(cli(t.dir, ['test', '--affected']).status, 0);
+  const run = readState(t.dir).testRuns[0];
+  assert.equal(run.kind, 'full'); assert.deepEqual(run.files, []);
+  assert.ok(t.markers().at(-1).endsWith('FULL'), t.markers().at(-1));
+});
+
+test('F2: a deletion after a full run runs full; a staged rename counts as a deletion', () => {
+  const t = setup();
+  assert.equal(cli(t.dir, ['test', '--full']).status, 0);
+  g(t.dir, 'mv', 'b.js', 'd.js');
+  assert.equal(cli(t.dir, ['test', '--affected']).status, 0);
+  assert.equal(readState(t.dir).testRuns[1].kind, 'full');
+  assert.equal(t.markers().length, 2);
+});
+
+test('F2: unchanged tree after a full run runs nothing and records green', () => {
+  const t = setup();
+  assert.equal(cli(t.dir, ['test', '--full']).status, 0);
+  assert.equal(cli(t.dir, ['test', '--affected']).status, 0);
+  const run = readState(t.dir).testRuns[1];
+  assert.equal(run.kind, 'affected'); assert.deepEqual(run.files, []); assert.equal(run.exit, 0);
+  assert.equal(t.markers().length, 1);
+});
+
+test('F2: empty file list at a tree other than the full run\'s runs full', () => {
+  const t = setup();
+  writeFileSync(join(t.dir, 'a.js'), '2');
+  assert.equal(cli(t.dir, ['test', '--full']).status, 0); // full at the uncommitted tree
+  writeFileSync(join(t.dir, 'a.js'), '1'); // back to HEAD: no diff vs full.head, other tree
+  assert.equal(cli(t.dir, ['test', '--affected']).status, 0);
+  assert.equal(readState(t.dir).testRuns[1].kind, 'full');
+  assert.equal(t.markers().length, 2);
+});
+
+test('F4: explicit --affected files are unioned with the changed files', () => {
+  const t = setup();
+  writeFileSync(join(t.dir, 'a.js'), '2');
+  assert.equal(cli(t.dir, ['test', '--affected', 'unrelated.js']).status, 0);
+  assert.deepEqual(readState(t.dir).testRuns[0].files, ['a.js', 'unrelated.js']);
+  assert.ok(t.markers().at(-1).endsWith('REL a.js unrelated.js'));
 });
