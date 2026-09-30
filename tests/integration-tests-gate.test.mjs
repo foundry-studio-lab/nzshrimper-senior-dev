@@ -311,3 +311,52 @@ test('F1: git -C <repo> push from outside any repo finds the session', () => {
   assert.equal(r.status, 2);
   assert.ok(r.out.includes(NOT_COVERED));
 });
+
+// ---- F3: finish and status apply the test rules ----
+function cliAt(cwd, args) {
+  const r = spawnSync('node', [CLI, ...args], { cwd, encoding: 'utf8', env: { ...process.env, SENIOR_DEV_OFFLINE: '1' } });
+  return { status: r.status, out: (r.stdout || '') + (r.stderr || '') };
+}
+const allDone = Object.fromEntries(CHAINS['quick-fix'].filter((p) => p !== 'finish').map((p) => [p, { status: 'done' }]));
+// testRuns: (repo) => runs, so a run can name the repo's own trees.
+function finishRepo(testRuns) {
+  const r = repoWithWorktree('sd-itg-fin-');
+  writeState(r.main, clearState({ phases: allDone, baseHead: git(r.main, 'rev-parse', 'HEAD'), testRuns: testRuns(r) }));
+  return r;
+}
+
+test('F3: finish after a local ff-merge of an untested tree is refused on coverage; status lists it', () => {
+  const { main } = finishRepo((r) => [full(1, { tree: r.mainTree })]);
+  git(main, 'merge', '-q', '--ff-only', 'feat');
+  const st = cliAt(main, ['status']);
+  assert.ok(st.out.includes(`tests: ${NOT_COVERED}`), st.out);
+  const r = cliAt(main, ['finish']);
+  assert.equal(r.status, 1, r.out);
+  assert.ok(r.out.includes(`tests: ${NOT_COVERED}`), r.out);
+  assert.ok(cliAt(main, ['finish', '--force-open', 'operator ok']).status === 0);
+});
+
+test('F3: finish succeeds once the merged tree is covered', () => {
+  const { main } = finishRepo((r) => [full(1, { tree: r.mainTree }), aff(2, { tree: r.wtTree })]);
+  git(main, 'merge', '-q', '--ff-only', 'feat');
+  const r = cliAt(main, ['finish']);
+  assert.equal(r.status, 0, r.out);
+});
+
+test('F3: nothing merged locally: rules 1-2 only', () => {
+  const { main } = finishRepo(() => []);
+  const r = cliAt(main, ['finish']);
+  assert.equal(r.status, 1);
+  assert.ok(r.out.includes('tests: no full test run recorded'), r.out);
+  writeState(main, clearState({ phases: allDone, baseHead: git(main, 'rev-parse', 'HEAD'), testRuns: [full(1, { tree: 'elsewhere' })] }));
+  assert.equal(cliAt(main, ['finish']).status, 0);
+});
+
+test('F3: no tests config: finish unchanged', () => {
+  const { main } = finishRepo(() => []);
+  writeSkillsConfig(main, { version: 2, source: 'superpowers', shared: false });
+  git(main, 'merge', '-q', '--ff-only', 'feat');
+  const st = cliAt(main, ['status']).out;
+  assert.ok(st.includes('open gate items (1):\n  - phase:finish'), st);
+  assert.equal(cliAt(main, ['finish']).status, 0);
+});

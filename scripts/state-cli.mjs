@@ -174,6 +174,20 @@ function requireSession(repoRoot) {
   return state;
 }
 
+// openGateItems plus the §3.3 test rules, for finish and status. Coverage of
+// the main checkout's HEAD only when it moved off baseHead (a local merge
+// that a later push would ship with the session gone). No tests config:
+// exactly openGateItems.
+function openItems(repoRoot, state) {
+  const items = openGateItems(state);
+  const tests = readSkillsConfig(repoRoot)?.tests;
+  if (!tests || tests.none) return items;
+  let head = null;
+  try { head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repoRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch { /* no commits */ }
+  const trees = head !== (state.baseHead ?? null) ? [headTree(repoRoot)] : undefined;
+  return [...items, ...testBlockers(state, { tests, trees }).map((b) => `tests: ${b}`)];
+}
+
 function git(repoRoot, args) {
   try {
     return execFileSync('git', args, { cwd: repoRoot, encoding: 'utf8' }).trimEnd();
@@ -587,7 +601,7 @@ switch (cmd) {
     if (state.bypassArmed) console.log(`bypass ARMED: ${state.bypassArmed.reason}`);
     if (state.ship) console.log(`SHIP armed: ${state.ship.reason} (full run #${state.ship.fullRun})`);
     if ((state.waits || []).length) console.log(`past waits: ${state.waits.length}`);
-    const open = openGateItems(state);
+    const open = openItems(repoRoot, state);
     console.log(open.length ? `open gate items (${open.length}):\n  - ${open.join('\n  - ')}` : 'all gates clear.');
     break;
   }
@@ -657,7 +671,7 @@ switch (cmd) {
     // BEFORE computing open gate items - otherwise phase:finish would always
     // read as open and every close would demand --force-open.
     state.phases.finish = { ...(state.phases.finish || {}), status: 'done' };
-    const open = openGateItems(state);
+    const open = openItems(repoRoot, state);
     if (open.length) {
       const forceOpen = flags['force-open'];
       if (forceOpen === undefined) {
