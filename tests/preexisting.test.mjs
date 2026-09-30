@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync, realpathSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync, realpathSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -21,7 +21,7 @@ const ID = 'a.test.js > X';
 // The fake runner reads the COMMITTED result.xml / exit files of whatever
 // checkout it runs in, so base and HEAD can behave differently.
 // base/head: { report: xml string | null, exit: number }.
-function setup({ base, head, tests = {}, branch = false }) {
+function setup({ base, head, tests = {}, branch = false, staleOnBase = null }) {
   const dir = mkdtempSync(join(tmpdir(), 'sd-pe-'));
   const aux = mkdtempSync(join(tmpdir(), 'sd-pe-aux-'));
   g(dir, 'init', '-q', '-b', 'main');
@@ -40,6 +40,11 @@ process.exit(Number(readFileSync('exit', 'utf8')));
     g(dir, 'add', '-A'); g(dir, 'commit', '-q', '--allow-empty', '-m', msg);
     return g(dir, 'rev-parse', 'HEAD');
   };
+  if (staleOnBase) {
+    mkdirSync(join(dir, '.senior-dev'), { recursive: true });
+    writeFileSync(join(dir, '.senior-dev', 'junit.xml'), staleOnBase);
+    g(dir, 'add', '-f', '.senior-dev/junit.xml');
+  }
   const baseSha = commit(base, 'base');
   writeSkillsConfig(dir, { version: 4, source: 'superpowers', shared: false, tests: {
     full: `node ${runner} FULL`, one: `node ${runner} ONE {test}`, report: '.senior-dev/junit.xml', ...tests,
@@ -116,6 +121,27 @@ test('absent from the HEAD report -> not proven', () => {
   assert.equal(r.status, 1, r.out);
   assert.equal(lastRun(s.dir).proven, false);
   assert.match(lastRun(s.dir).reason, /^absent from the HEAD report: /);
+});
+
+test('a stale report in the run checkout never proves (HEAD runner writes none)', () => {
+  const s = setup({ base: { report: xml([failing('X')]), exit: 1 }, head: { report: null, exit: 1 } });
+  mkdirSync(join(s.dir, '.senior-dev'), { recursive: true });
+  writeFileSync(join(s.dir, '.senior-dev', 'junit.xml'), xml([failing('X')]));
+  const r = cli(s.dir, ['test', '--preexisting', ID]);
+  assert.equal(r.status, 1, r.out);
+  assert.equal(lastRun(s.dir).proven, false);
+  assert.match(lastRun(s.dir).reason, /^absent from the HEAD report: /);
+});
+
+test('a stale report committed on base never proves (base runner crashes)', () => {
+  const s = setup({
+    base: { report: null, exit: 1 }, head: { report: xml([failing('X')]), exit: 1 },
+    staleOnBase: xml([failing('X')]),
+  });
+  const r = cli(s.dir, ['test', '--preexisting', ID]);
+  assert.equal(r.status, 1, r.out);
+  assert.equal(lastRun(s.dir).proven, false);
+  assert.match(lastRun(s.dir).reason, /^absent from the base report: /);
 });
 
 test('needs one and report configured', () => {
