@@ -313,7 +313,9 @@ export function testBlockers(state, ctx = {}) {
     if (dup.length) {
       return [`full test run #${F.id} has ambiguous failing ids: ${dup.join(', ')} - give those tests unique names, then state-cli test --full`];
     }
-    const proven = new Set(runs.filter((r) => r.kind === 'preexisting' && r.proven === true).map((r) => r.test));
+    // A proof holds for the full run it was made against: a later red full
+    // run may report the same id from another test, so it needs a re-proof.
+    const proven = new Set(runs.filter((r) => r.kind === 'preexisting' && r.proven === true && r.sinceFull === F.id).map((r) => r.test));
     const unproven = F.failures.filter((t) => !proven.has(t));
     if (unproven.length) {
       return [`full test run #${F.id} has ${unproven.length} failing test(s) not proven pre-existing: ${unproven.join(', ')}`];

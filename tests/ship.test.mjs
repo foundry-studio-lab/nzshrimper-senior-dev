@@ -105,6 +105,20 @@ test('refuses a full run whose failing ids repeat (one proof must not waive two 
   assert.equal(readState(dir).ship, undefined);
 });
 
+test('a proof counts only for the full run it was made against (a later red full run needs re-proof)', () => {
+  // Proven against F1 (file A), ship armed; the diff later adds a same-id
+  // failure in file B and a new red full run F2 reports it: the stale proof
+  // must not waive F2.
+  const { dir, tree, set } = setup();
+  set([red(1, tree), pre(2, 'a > x', tree), { ...red(3, tree), passedCount: 1 }], { ship: { reason: 'r', at: 'now', fullRun: 1 } });
+  const b = integrationBlockers(readState(dir), { tests: TESTS, trees: [tree] });
+  assert.ok(b.some((x) => /full test run #3 has 1 failing test\(s\) not proven pre-existing: a > x/.test(x)), b.join('|'));
+  // Re-proved against F3: waived again.
+  set([red(1, tree), pre(2, 'a > x', tree), { ...red(3, tree), passedCount: 1 }, { ...pre(4, 'a > x', tree), sinceFull: 3 }], { ship: { reason: 'r', at: 'now', fullRun: 1 } });
+  const b2 = integrationBlockers(readState(dir), { tests: TESTS, trees: [tree] });
+  assert.ok(!b2.some((x) => /test run|not proven/.test(x)), b2.join('|'));
+});
+
 test('refuses when the current HEAD tree is not covered', () => {
   const { dir, set } = setup();
   set([red(1, 'other-tree'), pre(2, 'a > x', 'other-tree')]);
