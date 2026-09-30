@@ -94,11 +94,14 @@ function hooksDir(repoRoot) {
 }
 
 function shimSource(hookName) {
+  // pre-push gets the pushed refs on stdin; buffer them so a chained prior
+  // hook and the guard both see them.
+  const pp = hookName === 'pre-push';
   return `#!/bin/sh
 ${SHIM_MARK} (${hookName}) - installed by the senior-dev plugin; 'state-cli guard uninstall' removes it.
 HOOK_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-if [ -x "$HOOK_DIR/${hookName}.pre-senior-dev" ]; then
-  "$HOOK_DIR/${hookName}.pre-senior-dev" "$@" || exit $?
+${pp ? 'IN=$(cat)\n' : ''}if [ -x "$HOOK_DIR/${hookName}.pre-senior-dev" ]; then
+  ${pp ? 'printf \'%s\\n\' "$IN" | ' : ''}"$HOOK_DIR/${hookName}.pre-senior-dev" "$@" || exit $?
 fi
 COMMON_DIR=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
 [ -n "$COMMON_DIR" ] || exit 0
@@ -107,7 +110,7 @@ GUARD="$REPO_ROOT/.senior-dev/guard/guard.mjs"
 STATE_LIB="$REPO_ROOT/.senior-dev/guard/state-lib.mjs"
 if [ ! -f "$GUARD" ] || [ ! -f "$STATE_LIB" ]; then echo "senior-dev guard: bundle missing - failing open" >&2; exit 0; fi
 if ! command -v node >/dev/null 2>&1; then echo "senior-dev guard: node not found - failing open" >&2; exit 0; fi
-exec node "$GUARD" ${hookName} "$@"
+${pp ? 'printf \'%s\\n\' "$IN" | ' : ''}exec node "$GUARD" ${hookName} "$@"
 `;
 }
 

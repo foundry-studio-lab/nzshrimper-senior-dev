@@ -57,10 +57,11 @@ export function findRepoRoot(cwd = process.cwd()) {
   }
 }
 
-// The tree of HEAD in the checkout at cwd; null when there are no commits.
-export function headTree(cwd) {
+// The tree of HEAD (or `rev`) in the checkout at cwd; null when there are
+// no commits or git fails.
+export function headTree(cwd, rev = 'HEAD') {
   try {
-    return execFileSync('git', ['rev-parse', 'HEAD^{tree}'], {
+    return execFileSync('git', ['rev-parse', '--verify', '-q', `${rev}^{tree}`], {
       cwd, stdio: ['ignore', 'pipe', 'ignore'],
     }).toString().trim() || null;
   } catch {
@@ -283,8 +284,11 @@ export function openGateItems(state) {
 
 // Spec §3.3: with a `tests` config, integration needs one full run F (the
 // latest), F green or every failure proven pre-existing with `ship` armed,
-// and the current tree covered by F or a later green affected run.
-function testBlockers(state, tree) {
+// and - only when the action ships code (ctx.trees given) - every shipped
+// tree covered by F or a later green affected run. [] when no tests config.
+export function testBlockers(state, ctx = {}) {
+  const tests = ctx?.tests;
+  if (!isPlainObject(tests) || tests.none) return [];
   const runs = state.testRuns || [];
   const F = runs.filter((r) => r.kind === 'full').reduce((m, r) => (!m || r.id > m.id ? r : m), null);
   if (!F) return ['no full test run recorded (state-cli test --full)'];
@@ -299,9 +303,11 @@ function testBlockers(state, tree) {
     }
     if (!state.ship) return [`full test run #${F.id} failures are all pre-existing; waiving them needs /senior-dev:ship`];
   }
-  const covered = tree != null && (F.tree === tree || runs.some((r) => r.kind === 'affected'
+  const trees = ctx.trees;
+  if (!Array.isArray(trees)) return [];
+  const covered = (tree) => tree != null && (F.tree === tree || runs.some((r) => r.kind === 'affected'
     && r.exit === 0 && r.sinceFull === F.id && r.tree === tree));
-  return covered ? [] : [`current tree is not covered by a green test run since full run #${F.id} (state-cli test --affected)`];
+  return trees.length && trees.every(covered) ? [] : [`current tree is not covered by a green test run since full run #${F.id} (state-cli test --affected)`];
 }
 
 export function integrationBlockers(state, ctx = {}) {
@@ -318,8 +324,7 @@ export function integrationBlockers(state, ctx = {}) {
   for (const [k, v] of Object.entries(state.docsGate || {})) {
     if (v === false) blockers.push(`docs gate item '${k}' incomplete`);
   }
-  const tests = ctx?.tests;
-  if (isPlainObject(tests) && !tests.none) blockers.push(...testBlockers(state, ctx.tree));
+  blockers.push(...testBlockers(state, ctx));
   return blockers;
 }
 

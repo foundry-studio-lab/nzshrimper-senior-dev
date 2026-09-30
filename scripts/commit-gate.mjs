@@ -4,7 +4,7 @@
 // verification, and a full docs gate. Fail open on any error.
 import { pathToFileURL } from 'node:url';
 import { realpathSync, writeFileSync, mkdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve, isAbsolute } from 'node:path';
 import { createHash } from 'node:crypto';
 import {
   findRepoRoot, readState, hasActiveSession, currentPhase,
@@ -45,6 +45,16 @@ function stripHeredocBodies(command) {
 // env assignments) is exactly `git` or `gh`, walking past leading flags
 // (and their values) to find the real subcommand.
 export function classifyCommand(command) {
+  const { commit, integration } = parseCommand(command);
+  return { commit, integration };
+}
+
+// The integration segments: [{kind: push|merge|pr-create|pr-merge, dir}].
+export function integrationTargets(command) {
+  return parseCommand(command).integrations;
+}
+
+function parseCommand(command) {
   // Heredocs BEFORE quotes: the delimiter may itself be quoted (<<'EOF'),
   // and quote-stripping first would erase the delimiter while leaving the
   // body lines behind as apparent commands. The canonical
@@ -57,6 +67,9 @@ export function classifyCommand(command) {
 
   let commit = false;
   let integration = false;
+  // Each integration segment: {kind: push|merge|pr-create|pr-merge, dir}
+  // where dir is the git segment's `-C` path(s), joined, or null.
+  const integrations = [];
 
   for (const segment of segments) {
     const tokens = segment.trim().split(/\s+/).filter(Boolean);
@@ -69,30 +82,35 @@ export function classifyCommand(command) {
     if (head !== 'git' && head !== 'gh') continue;
 
     let i = 0;
+    const dirs = [];
     while (i < rest.length && rest[i].startsWith('-')) {
+      if (head === 'git' && rest[i] === '-C' && i + 1 < rest.length) dirs.push(rest[i + 1]);
       if (VALUE_FLAGS.has(rest[i])) i += 2;
       else i += 1;
     }
     if (i >= rest.length) continue;
+    // Later -C values are relative to earlier ones; an absolute one resets.
+    const dir = dirs.length ? dirs.reduce((a, d) => (isAbsolute(d) ? d : join(a, d))) : null;
+    const add = (kind) => { integration = true; integrations.push({ kind, dir }); };
 
     if (head === 'git') {
       const sub = rest[i];
       if (sub === 'commit') {
         commit = true;
       } else if (sub === 'push' || sub === 'merge') {
-        integration = true;
+        add(sub);
       } else if (sub === 'subtree' && rest.slice(i + 1).includes('push')) {
-        integration = true;
+        add('push');
       }
     } else {
       // gh
       if (rest[i] === 'pr' && (rest[i + 1] === 'create' || rest[i + 1] === 'merge')) {
-        integration = true;
+        add(`pr-${rest[i + 1]}`);
       }
     }
   }
 
-  return { commit, integration };
+  return { commit, integration, integrations };
 }
 
 async function readStdin() {
@@ -112,7 +130,7 @@ async function main() {
     const data = JSON.parse(await readStdin());
     if (data.tool_name !== 'Bash') process.exit(0);
     const command = data.tool_input?.command || '';
-    const { commit: isCommit, integration: isIntegration } = classifyCommand(command);
+    const { commit: isCommit, integration: isIntegration, integrations } = parseCommand(command);
     if (!isIntegration && !isCommit) process.exit(0);
 
     const repoRoot = findRepoRoot(data.cwd || process.cwd());
@@ -126,8 +144,14 @@ async function main() {
     let blockMsg = null;
 
     if (isIntegration) {
+      // Coverage (§3.3 rule 3) only where code ships: push and gh pr create,
+      // checked against the target checkout's HEAD (a `-C` dir, else cwd).
+      // A merge's tree does not exist yet, so merges get rules 1-2 only.
+      const cwd = data.cwd || process.cwd();
+      const shipping = integrations.filter((x) => x.kind === 'push' || x.kind === 'pr-create');
       const blockers = integrationBlockers(state, {
-        tree: headTree(data.cwd || process.cwd()), tests: readSkillsConfig(repoRoot)?.tests,
+        tests: readSkillsConfig(repoRoot)?.tests,
+        trees: shipping.length ? shipping.map((x) => headTree(resolve(cwd, x.dir ?? '.'))) : undefined,
       });
       if (blockers.length) {
         blockMsg = `integration blocked (${blockers.length} item${blockers.length > 1 ? 's' : ''}):\n- ${blockers.join('\n- ')}`;
@@ -144,13 +168,14 @@ async function main() {
     // A consumed bypass allows the action but must still fall through to the
     // token write below - the guard's fresh evaluation would re-find the same
     // blockers, and the spent bypass cannot cover them twice.
-    if (blockMsg && !consumeBypass(repoRoot, state, command.slice(0, 120))) {
-      block(blockMsg);
-    }
+    const bypassed = !!blockMsg && !!consumeBypass(repoRoot, state, command.slice(0, 120));
+    if (blockMsg && !bypassed) block(blockMsg);
 
     // Allowed. If this was a gated action (integration or commit) and the
     // universal guard is installed, leave a single-use pass token so the
     // git hook does not re-evaluate (and cannot double-consume a bypass).
+    // pre-push still checks test coverage of the pushed shas unless the
+    // token says a bypass was consumed (`bypassed`).
     // Best-effort. A command that is somehow both (`git commit && git push`)
     // gets the 'integration' token - it is the stricter, later-firing hook.
     if (isIntegration || isCommit) {
@@ -161,6 +186,7 @@ async function main() {
           writeFileSync(join(dir, 'pass.json'), JSON.stringify({
             type: isIntegration ? 'integration' : 'commit',
             commandHash: createHash('sha256').update(command).digest('hex'),
+            bypassed,
             expiresAt: new Date(Date.now() + 60_000).toISOString(),
           }));
         }
