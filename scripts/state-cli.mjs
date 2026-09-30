@@ -334,9 +334,10 @@ switch (cmd) {
     if (!['codex', 'claude'].includes(flags.reviewer)) fail('review needs --reviewer codex|claude');
     if (!['APPROVED', 'NEEDS_REVISION'].includes(flags.verdict)) fail('review needs --verdict APPROVED|NEEDS_REVISION');
     const cycleRaw = flags.cycle === undefined ? '1' : flags.cycle;
-    if (!/^[0-9]+$/.test(cycleRaw) || parseInt(cycleRaw, 10) < 1) fail('review needs --cycle as a positive integer 1-3');
+    if (!/^[0-9]+$/.test(cycleRaw) || parseInt(cycleRaw, 10) < 1) fail('review needs --cycle as a positive integer 1-4 (4 only as the confirming APPROVED)');
     const cycle = parseInt(cycleRaw, 10);
-    if (cycle > 3) fail('cycle cap is 3 - stop iterating and escalate to the operator');
+    // Cycle 4 is the one confirming pass after cycle-3 fixes: APPROVED only.
+    if (cycle > 4 || (cycle === 4 && flags.verdict !== 'APPROVED')) fail('cycle cap is 3 - stop iterating and escalate to the operator');
     const dup = (state.reviews || []).find((r) => r.phase === flags.phase && r.reviewer === flags.reviewer && (r.cycle ?? 1) === cycle);
     if (dup) fail(`review already recorded for ${flags.reviewer} on '${flags.phase}' at cycle ${cycle} (${dup.verdict}) - record the next cycle instead`);
     state.reviews.push({
@@ -615,6 +616,40 @@ switch (cmd) {
     // it (the external work finished) or it was abandoned. --force-open is
     // for open GATE items with an operator sign-off; it does not apply here.
     if (state.waiting) fail(`finish refused - still waiting on: ${state.waiting.on} - clear it first or the wait was abandoned`);
+    if (flags['no-change'] !== undefined) {
+      const reason = flags['no-change'];
+      if (typeof reason !== 'string' || !reason.trim()) fail('finish --no-change needs a non-empty reason');
+      if (flags['force-open'] !== undefined) fail('finish --no-change cannot be combined with --force-open');
+      if (typeof state.baseHead !== 'string') fail('finish --no-change needs a session recorded by 0.4+ with a base commit - use finish or finish --force-open');
+      const g = (...a) => execFileSync('git', a, { cwd: repoRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+      const head = g('rev-parse', 'HEAD').trim();
+      if (head !== state.baseHead) fail(`finish --no-change refused - HEAD moved: ${state.baseHead.slice(0, 7)} -> ${head.slice(0, 7)}`);
+      const now = {};
+      for (const line of g('for-each-ref', '--format=%(refname) %(objectname)', 'refs/heads').split('\n')) {
+        const [name, sha] = line.trim().split(' ');
+        if (name) now[name] = sha;
+      }
+      const base = state.baseRefs || {};
+      for (const name of new Set([...Object.keys(base), ...Object.keys(now)])) {
+        if (base[name] !== undefined ? base[name] !== now[name] : now[name] !== state.baseHead) {
+          fail(`finish --no-change refused - branch ${name.replace(/^refs\/heads\//, '')} changed`);
+        }
+      }
+      if (g('status', '--porcelain').trim()) fail('finish --no-change refused - working tree not clean');
+      const extra = g('worktree', 'list', '--porcelain').split('\n').filter((l) => l.startsWith('worktree ')).slice(1);
+      if (extra.length) fail(`finish --no-change refused - extra worktree: ${extra[0].slice('worktree '.length)}`);
+      state.outcome = 'no-change';
+      state.noChangeReason = reason.trim();
+      state.closedAt = new Date().toISOString();
+      const slug = state.task.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'session';
+      const histDir = join(repoRoot, '.senior-dev', 'history');
+      mkdirSync(histDir, { recursive: true });
+      const dest = join(histDir, `${state.closedAt.replace(/[:.]/g, '-')}-${slug}.json`);
+      writeState(repoRoot, state);
+      renameSync(statePath(repoRoot), dest);
+      console.log(`session closed (no change) and archived: ${dest}`);
+      break;
+    }
     // Running `finish` completes the chain's final phase, so mark it done
     // BEFORE computing open gate items - otherwise phase:finish would always
     // read as open and every close would demand --force-open.
@@ -795,9 +830,9 @@ switch (cmd) {
       let lane = typeof flags.lane === 'string' ? flags.lane : null;
       if (!lane) {
         const st = readState(repoRoot);
-        lane = (hasActiveSession(st) && CHAINS[st.type]) ? st.type : 'feature';
+        lane = (hasActiveSession(st) && isLane(st.type)) ? st.type : 'feature';
       }
-      if (!CHAINS[lane]) fail(`resolve --lane must be one of: ${Object.keys(CHAINS).join(', ')}`);
+      if (!isLane(lane)) fail(`resolve --lane must be one of: ${Object.keys(CHAINS).join(', ')}`);
       const cfg = readSkillsConfig(repoRoot);
       console.log(`# resolved skills - lane: ${lane} (source: ${cfg?.source || 'superpowers'})`);
       for (const phase of CHAINS[lane]) {
@@ -814,9 +849,9 @@ switch (cmd) {
       let lane = typeof flags.lane === 'string' ? flags.lane : null;
       if (!lane) {
         const st = readState(repoRoot);
-        lane = (hasActiveSession(st) && CHAINS[st.type]) ? st.type : 'feature';
+        lane = (hasActiveSession(st) && isLane(st.type)) ? st.type : 'feature';
       }
-      if (!CHAINS[lane]) fail(`models --lane must be one of: ${Object.keys(CHAINS).join(', ')}`);
+      if (!isLane(lane)) fail(`models --lane must be one of: ${Object.keys(CHAINS).join(', ')}`);
       const cfg = readSkillsConfig(repoRoot);
       console.log(`# resolved models - lane: ${lane}`);
       for (const phase of [...CHAINS[lane], 'adjudicate']) {
@@ -831,7 +866,7 @@ switch (cmd) {
     if (sub === 'set-models') {
       requireValues('skills-config set-models', flags, ['steps', 'lane']);
       const lane = typeof flags.lane === 'string' ? flags.lane : null;
-      if (lane && !CHAINS[lane]) fail(`set-models --lane must be one of: ${Object.keys(CHAINS).join(', ')}`);
+      if (lane && !isLane(lane)) fail(`set-models --lane must be one of: ${Object.keys(CHAINS).join(', ')}`);
       if (typeof flags.steps !== 'string') fail("set-models needs --steps 'phase=<claude>[/<codex>],...'");
       const allowed = lane ? [...CHAINS[lane], 'adjudicate'] : MODEL_PHASES;
       const map = parseModelSteps(flags.steps, allowed);
