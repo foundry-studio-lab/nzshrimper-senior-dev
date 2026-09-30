@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import {
   findRepoRoot, readState, hasActiveSession, currentPhase,
-  integrationBlockers, consumeBypass, readSkillsConfig,
+  integrationBlockers, consumeBypass, readSkillsConfig, headTree,
 } from './lib/state.mjs';
 
 const TEST_GATED_PHASES = new Set(['implement', 'debug']);
@@ -126,7 +126,9 @@ async function main() {
     let blockMsg = null;
 
     if (isIntegration) {
-      const blockers = integrationBlockers(state);
+      const blockers = integrationBlockers(state, {
+        tree: headTree(data.cwd || process.cwd()), tests: readSkillsConfig(repoRoot)?.tests,
+      });
       if (blockers.length) {
         blockMsg = `integration blocked (${blockers.length} item${blockers.length > 1 ? 's' : ''}):\n- ${blockers.join('\n- ')}`;
       }

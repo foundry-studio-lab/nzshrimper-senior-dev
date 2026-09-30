@@ -8,7 +8,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   findRepoRoot, readState, hasActiveSession, currentPhase,
-  integrationBlockers, consumeBypass,
+  integrationBlockers, consumeBypass, readSkillsConfig, headTree,
 } from './state-lib.mjs';
 
 const TEST_GATED_PHASES = new Set(['implement', 'debug']);
@@ -47,7 +47,9 @@ try {
 
   let blockMsg = null;
   if (INTEGRATION_HOOKS.has(hookName)) {
-    const blockers = integrationBlockers(state);
+    const blockers = integrationBlockers(state, {
+      tree: headTree(process.cwd()), tests: readSkillsConfig(repoRoot)?.tests,
+    });
     if (blockers.length) {
       blockMsg = `integration blocked (${blockers.length} item${blockers.length > 1 ? 's' : ''}):\n- ${blockers.join('\n- ')}`;
     }

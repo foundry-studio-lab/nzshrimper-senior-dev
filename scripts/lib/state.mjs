@@ -281,7 +281,30 @@ export function openGateItems(state) {
   return items;
 }
 
-export function integrationBlockers(state) {
+// Spec §3.3: with a `tests` config, integration needs one full run F (the
+// latest), F green or every failure proven pre-existing with `ship` armed,
+// and the current tree covered by F or a later green affected run.
+function testBlockers(state, tree) {
+  const runs = state.testRuns || [];
+  const F = runs.filter((r) => r.kind === 'full').reduce((m, r) => (!m || r.id > m.id ? r : m), null);
+  if (!F) return ['no full test run recorded (state-cli test --full)'];
+  if (F.exit !== 0) {
+    if (!Array.isArray(F.failures) || F.failures.length === 0) {
+      return [`full test run #${F.id} failed and its failures are unknown (no JUnit report)`];
+    }
+    const proven = new Set(runs.filter((r) => r.kind === 'preexisting' && r.proven === true).map((r) => r.test));
+    const unproven = F.failures.filter((t) => !proven.has(t));
+    if (unproven.length) {
+      return [`full test run #${F.id} has ${unproven.length} failing test(s) not proven pre-existing: ${unproven.join(', ')}`];
+    }
+    if (!state.ship) return [`full test run #${F.id} failures are all pre-existing; waiving them needs /senior-dev:ship`];
+  }
+  const covered = tree != null && (F.tree === tree || runs.some((r) => r.kind === 'affected'
+    && r.exit === 0 && r.sinceFull === F.id && r.tree === tree));
+  return covered ? [] : [`current tree is not covered by a green test run since full run #${F.id} (state-cli test --affected)`];
+}
+
+export function integrationBlockers(state, ctx = {}) {
   const blockers = [];
   for (const [phase, v] of Object.entries(latestVerdicts(state))) {
     if (v !== 'APPROVED') blockers.push(`review for '${phase}' is ${v}, not APPROVED`);
@@ -295,6 +318,8 @@ export function integrationBlockers(state) {
   for (const [k, v] of Object.entries(state.docsGate || {})) {
     if (v === false) blockers.push(`docs gate item '${k}' incomplete`);
   }
+  const tests = ctx?.tests;
+  if (isPlainObject(tests) && !tests.none) blockers.push(...testBlockers(state, ctx.tree));
   return blockers;
 }
 
