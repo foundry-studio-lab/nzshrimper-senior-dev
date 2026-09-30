@@ -20,4 +20,4 @@ If it refuses, relay the refusal verbatim; do not work around it.
 Confirm to the operator: this waives ONLY test failures proven pre-existing
 on the base commit. Reviews, verify and the docs gate still gate, every new
 commit still needs affected-test coverage, and the reason is logged in
-session state and shown in the finish summary.
+session state, shown by `status`, and kept in the session archive.
