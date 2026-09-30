@@ -12,7 +12,7 @@ import {
   CHAINS, DOCS_GATE, findRepoRoot, readState, writeState, statePath,
   hasActiveSession, currentPhase, latestVerdicts, latestReview, openGateItems, ensureExcluded,
   VALID_SOURCES, readSkillsConfig, writeSkillsConfig, resolveConfiguredSkill, normalizeLaneValue,
-  stampVersion, resolveModel, MODEL_PHASES, CLAUDE_TIERS, CODEX_EFFORTS, TIER_RANK,
+  stampVersion, validTests, resolveModel, MODEL_PHASES, CLAUDE_TIERS, CODEX_EFFORTS, TIER_RANK,
 } from './lib/state.mjs';
 import { codexUpdateNotice } from './lib/codex-check.mjs';
 
@@ -192,9 +192,23 @@ switch (cmd) {
     if (!CHAINS[flags.type]) fail(`init needs --type, one of: ${Object.keys(CHAINS).join(', ')}`);
     const existing = readState(repoRoot);
     if (hasActiveSession(existing)) fail(`a session is already active ('${existing.task}'); finish or bypass it first`);
+    let baseHead = null;
+    const baseRefs = {};
+    try {
+      baseHead = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repoRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    } catch { /* no commits yet */ }
+    try {
+      const refs = execFileSync('git', ['for-each-ref', '--format=%(refname) %(objectname)', 'refs/heads'], { cwd: repoRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+      for (const line of refs.split('\n')) {
+        const [name, sha] = line.trim().split(' ');
+        if (name && sha) baseRefs[name] = sha;
+      }
+    } catch { /* leave empty */ }
     const state = {
       version: 1,
       task: flags.task,
+      baseHead,
+      baseRefs,
       type: flags.type,
       startedAt: new Date().toISOString(),
       worktree: null,
@@ -632,6 +646,7 @@ switch (cmd) {
       if (existing.guard !== undefined) cfg.guard = existing.guard;
       if (existing.lanes !== undefined) cfg.lanes = existing.lanes;
       if (existing.models !== undefined) cfg.models = existing.models;
+      if (existing.tests !== undefined) cfg.tests = existing.tests;
       stampVersion(cfg);
       writeSkillsConfig(repoRoot, cfg);
       ensureExcluded(repoRoot);
@@ -732,7 +747,28 @@ switch (cmd) {
       console.log(`models ${lane ? `lane '${lane}'` : 'steps'}: ${JSON.stringify(target)}`);
       break;
     }
-    fail('skills-config needs a subcommand: show | set | share | unshare | set-lane | resolve | models | set-models');
+    if (sub === 'set-tests') {
+      const keys = ['full', 'related', 'one', 'report', 'setup', 'build'];
+      requireValues('skills-config set-tests', flags, keys);
+      const given = keys.filter((k) => flags[k] !== undefined);
+      let tests;
+      if (flags.none !== undefined) {
+        if (given.length) fail('set-tests --none cannot be combined with other flags');
+        tests = { none: true };
+      } else {
+        if (flags.full === undefined) fail('set-tests needs --full <command> or --none');
+        tests = Object.fromEntries(given.map((k) => [k, flags[k]]));
+        if (!validTests(tests)) fail('set-tests --full needs a non-empty command');
+      }
+      const cfg = readSkillsConfig(repoRoot) || { source: 'superpowers', shared: false };
+      cfg.tests = tests;
+      stampVersion(cfg);
+      writeSkillsConfig(repoRoot, cfg);
+      ensureExcluded(repoRoot);
+      console.log(`tests config: ${JSON.stringify(tests)}`);
+      break;
+    }
+    fail('skills-config needs a subcommand: show | set | share | unshare | set-lane | resolve | models | set-models | set-tests');
     break;
   }
   case 'skill-source': {

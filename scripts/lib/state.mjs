@@ -105,6 +105,15 @@ export function validModels(models) {
   return true;
 }
 
+const TEST_KEYS = ['related', 'one', 'report', 'setup', 'build'];
+export function validTests(t) {
+  if (!isPlainObject(t)) return false;
+  const keys = Object.keys(t);
+  if (keys.length === 1 && keys[0] === 'none') return t.none === true;
+  return typeof t.full === 'string' && t.full !== ''
+    && keys.every((k) => k === 'full' || (TEST_KEYS.includes(k) && typeof t[k] === 'string'));
+}
+
 export function skillsConfigPath(repoRoot) {
   return join(repoRoot, '.senior-dev', 'skills.json');
 }
@@ -113,7 +122,8 @@ export function readSkillsConfig(repoRoot) {
   try {
     const c = JSON.parse(readFileSync(skillsConfigPath(repoRoot), 'utf8'));
     if (typeof c !== 'object' || c === null) return null;
-    if (![1, 2, 3].includes(c.version)) return null;
+    if (![1, 2, 3, 4].includes(c.version)) return null;
+    if (c.tests !== undefined && !validTests(c.tests)) return null;
     if (c.models !== undefined && !validModels(c.models)) return null;
     if (c.source !== undefined && !VALID_SOURCES.includes(c.source)) return null;
     if (c.guard !== undefined && !['installed', 'declined'].includes(c.guard)) return null;
@@ -167,7 +177,7 @@ export function resolveModel(cfg, laneType, phase) {
 // optional models block is present, so machines on v0.2 keep reading
 // files that never used it.
 export function stampVersion(cfg) {
-  cfg.version = cfg.models !== undefined ? 3 : 2;
+  cfg.version = cfg.tests !== undefined ? 4 : cfg.models !== undefined ? 3 : 2;
   return cfg;
 }
 

@@ -61,7 +61,7 @@ test('every models breach makes readSkillsConfig return null', () => {
     (c) => { c.models.steps.notaphase = { claude: 'opus' }; },
     (c) => { c.models.lanes.notalane = { finish: { claude: 'opus' } }; },
     (c) => { c.models.lanes.feature.finish = 'opus'; },
-    (c) => { c.version = 4; },
+    (c) => { c.version = 5; },
   ];
   for (const [i, b] of breaches.entries()) {
     const c = V3(); b(c); writeSkillsConfig(repo, c);
