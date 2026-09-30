@@ -4,7 +4,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { readState, CHAINS, LANE_RANK, openGateItems } from '../scripts/lib/state.mjs';
+import { readState, writeState, CHAINS, LANE_RANK, openGateItems } from '../scripts/lib/state.mjs';
 
 const CLI = new URL('../scripts/state-cli.mjs', import.meta.url).pathname;
 function makeRepo() {
@@ -103,4 +103,64 @@ test('a done debug phase is kept after bug-fix -> feature and is not an open gat
   assert.equal(s.phases.debug.status, 'done');
   assert.ok(!openGateItems(s).includes('phase:debug'));
   assert.ok(openGateItems(s).includes('phase:brainstorm'));
+});
+
+test('prototype-key lane names are refused everywhere, state unchanged', () => {
+  const repo = makeRepo();
+  assert.equal(cli(repo, ['init', '--task', 't', '--type', 'constructor']).status, 1);
+  assert.equal(readState(repo), null);
+  start(repo, 'quick-fix');
+  const before = JSON.stringify(readState(repo));
+  for (const t of ['constructor', '__proto__', 'toString', 'hasOwnProperty']) {
+    assert.equal(re(repo, t).status, 1, t);
+    assert.equal(re(repo, t, '--by-operator').status, 1, t);
+  }
+  assert.equal(JSON.stringify(readState(repo)), before);
+  const sl = cli(repo, ['skills-config', 'set-lane', 'constructor', '--steps', 'implement=own']);
+  assert.equal(sl.status, 1);
+  assert.ok(sl.out.includes('set-lane needs a lane, one of:'), sl.out);
+});
+
+test('reclassify refuses when the current session type is not a known lane', () => {
+  const repo = makeRepo();
+  start(repo, 'quick-fix');
+  const s = readState(repo);
+  s.type = 'constructor';
+  writeState(repo, s);
+  const r = re(repo, 'feature');
+  assert.equal(r.status, 1);
+  assert.ok(r.out.includes("session type 'constructor' is not a known lane - reclassify refused"), r.out);
+});
+
+test('dropping docs-gate keys needs --by-operator', () => {
+  const repo = makeRepo();
+  start(repo, 'refactor');
+  const r = re(repo, 'bug-fix');
+  assert.equal(r.status, 1);
+  assert.ok(r.out.includes("reclassifying refactor -> bug-fix drops gate items (spec, plan); it needs the operator's yes (--by-operator)"), r.out);
+  assert.equal(readState(repo).type, 'refactor');
+  assert.equal(re(repo, 'bug-fix', '--by-operator').status, 0);
+  assert.deepEqual(readState(repo).docsGate, { handover: false, affectedDocs: false });
+});
+
+test('a phase done in both lanes stays done', () => {
+  const repo = makeRepo();
+  start(repo, 'quick-fix');
+  cli(repo, ['phase', 'implement', '--status', 'done']);
+  cli(repo, ['phase', 'review', '--status', 'done']);
+  assert.equal(re(repo, 'feature').status, 0);
+  const s = readState(repo);
+  assert.equal(s.phases.implement.status, 'done');
+  assert.equal(s.phases.review.status, 'done');
+});
+
+test('feature -> quick-fix with brainstorm in_progress: phase is implement, brainstorm not open; status keeps 0.3.1 alignment', () => {
+  const repo = makeRepo();
+  start(repo, 'feature');
+  cli(repo, ['phase', 'brainstorm', '--status', 'in_progress']);
+  assert.equal(re(repo, 'quick-fix', '--by-operator').status, 0);
+  const out = cli(repo, ['status']).out;
+  assert.ok(out.includes('phase:  implement\n'), out);
+  assert.ok(!out.includes('phase:brainstorm'), out);
+  assert.ok(!openGateItems(readState(repo)).includes('phase:brainstorm'));
 });

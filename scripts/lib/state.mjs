@@ -16,6 +16,9 @@ export const CHAINS = {
   'investigation': ['investigate', 'finish'],
 };
 
+// Own-key check: `CHAINS['constructor']` is truthy, so a bare lookup is not a lane test.
+export const isLane = (t) => typeof t === 'string' && Object.hasOwn(CHAINS, t);
+
 // false = required and missing; true = done; null = waived for this lane.
 export const DOCS_GATE = {
   'feature':       { spec: false, plan: false, handover: false, affectedDocs: false },
