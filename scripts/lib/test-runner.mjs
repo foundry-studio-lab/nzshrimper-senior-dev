@@ -256,7 +256,9 @@ export function provePreexisting({ cwd, state, cfg, test }) {
   if (shared) reason = `ambiguous id: ${count(shared[1], test)} testcases in the ${shared[0]} report share it - make test names unique`;
   else if (h === 'passed') reason = 'passes on HEAD - nothing to prove';
   else if (h !== 'failed') reason = `absent from the HEAD report: ${h} (exit ${onHead.exit})`;
-  else if (b === 'failed' && hf && bf && hf !== bf) reason = `different test: fails from ${bf} on base, ${hf} on HEAD`;
+  // Both sides without a file attribute compare equal (id-only runners);
+  // a file on one side only is identity not established: refuse.
+  else if (b === 'failed' && hf !== bf) reason = `different test: fails from ${bf || '(no file)'} on base, ${hf || '(no file)'} on HEAD`;
   else if (b === 'failed') { proven = true; reason = `fails on base ${sha7} and HEAD`; }
   else if (b === 'passed') reason = `caused by this change: passes on base ${sha7}`;
   else reason = `absent from the base report: ${b} (exit ${onBase.exit})`;

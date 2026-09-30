@@ -97,6 +97,17 @@ test('a same id failing from a different file on base is never proven', () => {
   assert.match(lastRun(s.dir).reason, /^different test: fails from \S*a\.test\.mjs on base, \S*b\.test\.mjs on HEAD/);
 });
 
+test('a file attribute on one side only is never proven (identity not established)', () => {
+  const withFile = `<testcase classname="a.test.js" name="X" file="test/b.test.mjs"><failure message="x"/></testcase>`;
+  for (const [base, head] of [[xml([failing('X')]), xml([withFile])], [xml([withFile]), xml([failing('X')])]]) {
+    const s = setup({ base: { report: base, exit: 1 }, head: { report: head, exit: 1 } });
+    const r = cli(s.dir, ['test', '--preexisting', ID]);
+    assert.equal(r.status, 1, r.out);
+    assert.equal(lastRun(s.dir).proven, false);
+    assert.match(lastRun(s.dir).reason, /^different test: fails from (\(no file\)|test\/b\.test\.mjs) on base, (\(no file\)|test\/b\.test\.mjs) on HEAD$/);
+  }
+});
+
 test('the same file on base and HEAD still proves (file attribute present)', () => {
   const tc = `<testcase classname="a.test.js" name="X" file="test/a.test.mjs"><failure message="x"/></testcase>`;
   const s = setup({ base: { report: xml([tc]), exit: 1 }, head: { report: xml([tc]), exit: 1 } });
