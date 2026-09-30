@@ -167,6 +167,25 @@ test('stale report is not parsed', () => {
   assert.ok(readState(t.dir).phases.implement.testsGreenAt);
 });
 
+test('--affected works in a repo with no commits yet (every file counts as affected)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'sd-unborn-'));
+  const aux = mkdtempSync(join(tmpdir(), 'sd-unborn-aux-'));
+  g(dir, 'init', '-q');
+  g(dir, 'config', 'user.email', 't@t'); g(dir, 'config', 'user.name', 't');
+  const log = join(aux, 'log');
+  const rec = `node -e "require('fs').appendFileSync(process.argv[1], process.argv.slice(2).join(' ') + '\\n')" ${log}`;
+  writeSkillsConfig(dir, { version: 4, source: 'superpowers', shared: false, tests: { full: `${rec} FULL`, related: `${rec} REL {files}` } });
+  cli(dir, ['init', '--task', 't', '--type', 'quick-fix']);
+  writeFileSync(join(dir, 'a.js'), '1');
+  writeFileSync(join(dir, 'staged.js'), 's'); g(dir, 'add', 'staged.js');
+  const r = cli(dir, ['test', '--affected']);
+  assert.equal(r.status, 0, r.out);
+  const run = readState(dir).testRuns.at(-1);
+  assert.equal(run.kind, 'affected');
+  assert.deepEqual(run.files, ['a.js', 'staged.js']);
+  assert.ok(readFileSync(log, 'utf8').includes('REL a.js staged.js'));
+});
+
 test('--affected defaults to files changed since the last full run', () => {
   const t = setup();
   assert.equal(cli(t.dir, ['test', '--full']).status, 0);

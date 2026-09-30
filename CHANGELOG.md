@@ -14,6 +14,8 @@ clustering in five places; each is now a first-class, logged operation.
 - A run's tree fingerprint keeps the real index's mtime on its temporary
   copy, so a same-size edit made just after the last index write is not
   recorded as the old content (git's racily-clean check stays in force).
+- `test --affected` works before a repo's first commit (every file counts as
+  affected).
 - `test --affected` runs the full suite when any file was deleted (or
   renamed away) since the base, and whenever its file list is empty at a
   tree the latest full run did not cover. Explicit files add to the
@@ -23,10 +25,13 @@ clustering in five places; each is now a first-class, logged operation.
   gone. A coverage blocker names uncommitted changes when that is the cause.
 - The gate classifier keeps quoted flag values in place (`git -C "/a b"
   push`, `git -c 'k=v' push`, `gh --repo "o/r" pr create`); a `-C` holding a
-  command substitution or variable fails coverage closed, and `git -C
-  <repo> push` finds that repo's session (the `-C` target wins over cwd's
-  repo). This fix applies to repos without a tests config too: it only blocks
-  more (such commands used to slip past the review, verify and docs gates).
+  command substitution or variable fails coverage closed in the cwd's
+  session (the gate cannot expand it; see spec §9 — use literal `-C` paths),
+  and `git -C <repo> push` is judged by that repo's session (the `-C` target
+  wins over cwd's repo). The quoted-value fix applies to repos without a
+  tests config too and only blocks more (those commands used to slip past
+  the review, verify and docs gates); the target-wins rule means a push into
+  a repo with no session is no longer judged by the cwd's session.
 - A command touching several repos (`git push && git -C /repo/B push`) is
   judged per repo: each repo's pushes against its own session, tests config
   and bypass, blocked if any repo blocks, with each blocking repo named. A
@@ -67,6 +72,11 @@ report `stale`, which the conductor's resume step refreshes with
 `state-cli guard install`; run it yourself to pick up the new pre-push shim
 (it buffers stdin so a chained prior hook and the guard both see the pushed
 refs).
+
+Compatibility: `skills.json` becomes version 4 only when it has a `tests`
+block (including `set-tests --none`). senior-dev 0.3.x reads a v4 file as
+absent, so a SHARED, committed v4 skills.json looks unconfigured to a
+teammate still on 0.3.x until they upgrade.
 
 Known ceilings are listed in the spec (section 9).
 

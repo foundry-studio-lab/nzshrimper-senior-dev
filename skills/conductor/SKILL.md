@@ -155,7 +155,10 @@ silently skipped.
   until reviews are APPROVED, `verify` is done, the docs gate is clear,
   and, with a tests config, the test rules hold: one full run, green or
   waived, plus coverage on push/PR of the tree being shipped. `finish` and
-  `status` apply the same test rules.
+  `status` apply the same test rules. Use literal paths after `git -C` for
+  push and `gh pr create` (never `$(...)` or a variable): the gate cannot
+  expand them and judges such a push by the cwd's repo only. On repos that
+  ship, install the universal guard, which checks inside the target repo.
 - **Stop gate**: challenges any claim that the session is done (or that
   you've reached the `finish` phase) while gate items are still open.
 - The waivers are `/senior-dev:bypass <reason>` and, for test failures

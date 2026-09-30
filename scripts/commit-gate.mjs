@@ -203,7 +203,7 @@ async function main() {
       if (!g.blockMsg && g.commit) {
         const cur = currentPhase(g.state);
         if (cur && TEST_GATED_PHASES.has(cur) && !g.state.phases?.[cur]?.testsGreenAt) {
-          g.blockMsg = `commit blocked: phase '${cur}' has no green test run recorded. Run the tests, then: node "$CLAUDE_PLUGIN_ROOT/scripts/state-cli.mjs" tests-green (conductor skill shows the exact call).`;
+          g.blockMsg = `commit blocked: phase '${cur}' has no green test run recorded. Run the tests with node "$CLAUDE_PLUGIN_ROOT/scripts/state-cli.mjs" test --affected (or, in a repo without a tests config, run them yourself, then state-cli tests-green) - the conductor skill shows the exact call.`;
         }
       }
       if (g.blockMsg && many) g.blockMsg = `${g.root}: ${g.blockMsg}`;
