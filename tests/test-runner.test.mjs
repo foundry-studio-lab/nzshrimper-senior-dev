@@ -186,6 +186,37 @@ test('--affected works in a repo with no commits yet (every file counts as affec
   assert.ok(readFileSync(log, 'utf8').includes('REL a.js staged.js'));
 });
 
+test('--affected after a headless full run sees a deletion from the tested tree and runs full', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'sd-unborn3-'));
+  g(dir, 'init', '-q');
+  g(dir, 'config', 'user.email', 't@t'); g(dir, 'config', 'user.name', 't');
+  writeSkillsConfig(dir, { version: 4, source: 'superpowers', shared: false, tests: { full: 'node -e 0', related: 'node -e 0 {files}' } });
+  cli(dir, ['init', '--task', 't', '--type', 'quick-fix']);
+  writeFileSync(join(dir, 'a.js'), '1'); writeFileSync(join(dir, 'b.test.js'), '1');
+  assert.equal(cli(dir, ['test', '--full']).status, 0);
+  assert.equal(readState(dir).testRuns.at(-1).head, null);
+  rmSync(join(dir, 'b.test.js'));
+  writeFileSync(join(dir, 'a.js'), '2');
+  assert.equal(cli(dir, ['test', '--affected']).status, 0);
+  assert.equal(readState(dir).testRuns.at(-1).kind, 'full');
+});
+
+test('--affected after a headless full run whose tree was pruned runs full', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'sd-unborn4-'));
+  g(dir, 'init', '-q');
+  g(dir, 'config', 'user.email', 't@t'); g(dir, 'config', 'user.name', 't');
+  writeSkillsConfig(dir, { version: 4, source: 'superpowers', shared: false, tests: { full: 'node -e 0', related: 'node -e 0 {files}' } });
+  cli(dir, ['init', '--task', 't', '--type', 'quick-fix']);
+  writeFileSync(join(dir, 'a.js'), '1');
+  assert.equal(cli(dir, ['test', '--full']).status, 0);
+  const s = readState(dir);
+  s.testRuns.at(-1).tree = '0'.repeat(40); // stands in for a gc-pruned tree object
+  writeFileSync(join(dir, '.senior-dev', 'state.json'), JSON.stringify(s));
+  writeFileSync(join(dir, 'a.js'), '2');
+  assert.equal(cli(dir, ['test', '--affected']).status, 0);
+  assert.equal(readState(dir).testRuns.at(-1).kind, 'full');
+});
+
 test('--affected works in an unborn SHA-256 repo (empty tree asked of git, not hard-coded)', () => {
   const dir = mkdtempSync(join(tmpdir(), 'sd-sha256-'));
   const init = spawnSync('git', ['init', '-q', '--object-format=sha256', dir], { encoding: 'utf8' });

@@ -128,19 +128,24 @@ export function runTest({ repoRoot, cwd, state, cfg, kind, files, test }) {
   if (kind === 'affected') {
     if (!t.related) cmdKind = 'full';
     else {
-      // No commit to diff against (unborn HEAD, or a full run taken before
-      // the first commit): use the empty tree, so every file counts as
-      // affected (untracked ones come from ls-files).
-      // Asked of git: the empty tree's id depends on the repo's object format.
+      // A full run taken before the first commit has no head: diff against
+      // the tree it tested (modified and deleted since), or run the full
+      // suite if gc has pruned that tree. With no full run and no commit,
+      // use the empty tree (asked of git: its id depends on the object
+      // format), so every file counts as affected.
       const emptyTree = () => gitOut(cwd, ['hash-object', '-t', 'tree', '/dev/null']);
+      const hasObject = (id) => { try { gitOut(cwd, ['cat-file', '-e', id]); return true; } catch { return false; } };
       const F = last('full');
-      const base = F ? (F.head || emptyTree()) : (state.baseHead || (headSha(cwd) ? 'HEAD' : emptyTree()));
-      const changed = changedFiles(cwd, base);
-      deleted = changed.deleted;
-      // Explicit files add to the changed list, never replace it.
-      runFiles = [...new Set([...(files || []), ...changed.files])].sort();
-      template = t.related;
-      if (deleted) { cmdKind = 'full'; runFiles = []; }
+      const base = F ? (F.head || (F.tree && hasObject(F.tree) ? F.tree : null))
+        : (state.baseHead || (headSha(cwd) ? 'HEAD' : emptyTree()));
+      if (!base) { cmdKind = 'full'; deleted = true; } else {
+        const changed = changedFiles(cwd, base);
+        deleted = changed.deleted;
+        // Explicit files add to the changed list, never replace it.
+        runFiles = [...new Set([...(files || []), ...changed.files])].sort();
+        template = t.related;
+        if (deleted) { cmdKind = 'full'; runFiles = []; }
+      }
     }
   }
   if (kind === 'one') {
