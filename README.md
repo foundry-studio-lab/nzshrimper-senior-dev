@@ -2,7 +2,7 @@
 
 > A disciplined senior developer, with a second reviewer over its shoulder, for every Claude Code coding session.
 
-![version](https://img.shields.io/badge/version-0.4.0-6b2c8a) ![license](https://img.shields.io/badge/license-MIT-1f3a5f) ![tests](https://img.shields.io/badge/tests-323%20passing-4a6b3a) ![Claude Code](https://img.shields.io/badge/Claude%20Code-plugin-1a1814)
+![version](https://img.shields.io/badge/version-0.4.1-6b2c8a) ![license](https://img.shields.io/badge/license-MIT-1f3a5f) ![tests](https://img.shields.io/badge/tests-338%20passing-4a6b3a) ![Claude Code](https://img.shields.io/badge/Claude%20Code-plugin-1a1814)
 
 senior-dev turns an ordinary coding session into a run with rails: it classifies
 the task, insists on the right chain of installed skills, reviews the work with
@@ -161,7 +161,10 @@ misses tests inside a `describe`.
 The proof is strict: it refuses an id shared by two tests, a failure from a
 different file on base, and a full run that passed no tests (a command that
 never ran the suite - with `node --test`, pass a glob, not a directory), and
-a proof counts only for the full run it was made against.
+a proof counts only for the full run it was made against. Once a failure is
+proven, scoped runs that are red only on proven failures print `counts as
+green`: they satisfy the commit gate, and with `ship` armed they cover the
+push.
 A test that fails, passes and fails again stops the loop with `CONTRADICTION`
 until the operator says which behaviour is right. Declining the runner
 (`set-tests --none`) keeps the 0.3.1 `tests-green` behaviour. Known ceilings

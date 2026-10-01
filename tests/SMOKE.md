@@ -62,13 +62,20 @@ Setup: `mkdir -p <scratch>/sd-smoke && cd <scratch>/sd-smoke && git init && git 
 24. [ ] `dispatch --phase implement --claude haiku` refuses ("never lowers");
         `--claude opus` without `--reason` refuses; with `--reason` records
         and `status` shows `models used:` with the raise.
-25. [ ] Test runner + ship on a REAL vitest repo (needs `junit` reporter):
+25. [x] Test runner + ship on a REAL vitest repo (needs `junit` reporter):
         `skills-config set-tests` with full/related/one/report -> start a
         bug-fix, `test --affected` after an edit, `test --full` once; make a
         test fail on the base commit too -> `test --preexisting <id>` PROVEN
         -> `/senior-dev:ship <reason>` accepted, `status` shows the ship
         line; a failure caused by the diff -> ship refused naming it. A
         later commit without affected coverage -> `git push` BLOCKED.
+        PASSED 24/24 on 2026-10-01 (vitest 3.2.6, scratch project with a
+        nested `describe`, `setup` symlinking node_modules into the proof
+        worktree, guard installed, real pushes to a bare origin). The first
+        run on 0.4.0 FAILED: with the proven failure among the affected
+        tests every scoped run was red, so commits and push coverage were
+        impossible - fixed in 0.4.1 (`counts as green`); the same script
+        fails 11 checks on 0.4.0.
 26. [ ] Reclassify: quick-fix session -> `state-cli reclassify --type
         bug-fix --reason "grew"` -> same session, phases kept, `status`
         shows the history; `--type docs-only` refused without `--by-operator`.

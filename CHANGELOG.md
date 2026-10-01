@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.4.1 — 2026-10-01
+
+Fix found by SMOKE 25 on a real vitest project: in 0.4.0, once a
+pre-existing failure sat among the affected tests, every `test --affected`
+run was red, so the commit gate could never be satisfied in debug/implement
+and a push could never be covered, even with the failure proven and
+`/senior-dev:ship` armed.
+
+- A scoped run (`--affected`, `--one`) that is red only on failures proven
+  pre-existing against the latest full run now counts as green: it prints
+  `counts as green`, satisfies the commit gate (no `ship` needed), and with
+  `ship` armed covers its tree at push. Every failure must have failed in
+  that full run and have a proof from the same file; a failure the diff
+  caused keeps the run red.
+- Proofs record the test's file and runs record each failure's file; the
+  full-run waiver uses the same same-file match (a pre-0.4.1 proof is
+  refused for runners that emit file attributes - re-prove).
+- An unchanged tree since a full run that is green or red only on proven
+  failures is nothing to run, checked before escalation to the full suite
+  (no `related` command, a deletion), so it no longer reruns forever.
+  Explicitly named `--affected` files always run.
+
 ## 0.4.0 — 2026-10-01
 
 Friction pass. An audit of 441 archived sessions found the bypasses

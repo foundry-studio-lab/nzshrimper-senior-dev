@@ -197,7 +197,9 @@ path the moment the phase's deliverable exists.
    config; see also refactor and bug-fix, which follow it too):
    - After each fix run `state-cli test --affected` (files default to what
      changed). Use `test --one <id>` to re-check a single test. A green run
-     satisfies the commit gate; no `tests-green` needed.
+     satisfies the commit gate; no `tests-green` needed. So does a run that
+     prints `counts as green`: red only on failures already proven
+     pre-existing - its non-zero exit is expected, do not chase it.
    - Run `state-cli test --full` ONCE, when implement is complete - in the
      background when it can outlast the Bash timeout. Never run the full
      suite a second time to check a fix; later changes are covered by
