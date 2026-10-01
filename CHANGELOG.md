@@ -10,13 +10,16 @@ and a push could never be covered, even with the failure proven and
 
 - A scoped run (`--affected`, `--one`) that is red only on failures proven
   pre-existing against the latest full run now counts as green: it prints
-  `counts as green`, satisfies the commit gate (no `ship` needed), and with
-  `ship` armed covers its tree at push. Every failure must have failed in
-  that full run and have a proof from the same file; a failure the diff
-  caused keeps the run red.
+  `counts as green` and satisfies the commit gate (no `ship` needed). With
+  `ship` armed, such an `--affected` run also covers its tree at push (a
+  `--one` run never covers a push). Every failure must have failed in that
+  full run and have a proof from the same file; a failing test that is not
+  proven pre-existing keeps the run red (proof is by test identity - see
+  spec §9).
 - Proofs record the test's file and runs record each failure's file; the
-  full-run waiver uses the same same-file match (a pre-0.4.1 proof is
-  refused for runners that emit file attributes - re-prove).
+  full-run waiver uses the same same-file match. A proof recorded before
+  0.4.1 has no file, so it is refused wherever the run it is matched
+  against records one - re-prove.
 - An unchanged tree since a full run that is green or red only on proven
   failures is nothing to run, checked before escalation to the full suite
   (no `related` command, a deletion), so it no longer reruns forever.

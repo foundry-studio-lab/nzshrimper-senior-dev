@@ -163,8 +163,8 @@ different file on base, and a full run that passed no tests (a command that
 never ran the suite - with `node --test`, pass a glob, not a directory), and
 a proof counts only for the full run it was made against. Once a failure is
 proven, scoped runs that are red only on proven failures print `counts as
-green`: they satisfy the commit gate, and with `ship` armed they cover the
-push.
+green`: they satisfy the commit gate, and with `ship` armed an `--affected`
+run of that kind covers the push (a `--one` run never does).
 A test that fails, passes and fails again stops the loop with `CONTRADICTION`
 until the operator says which behaviour is right. Declining the runner
 (`set-tests --none`) keeps the 0.3.1 `tests-green` behaviour. Known ceilings
