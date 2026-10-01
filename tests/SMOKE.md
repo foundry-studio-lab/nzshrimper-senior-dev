@@ -76,12 +76,25 @@ Setup: `mkdir -p <scratch>/sd-smoke && cd <scratch>/sd-smoke && git init && git 
         tests every scoped run was red, so commits and push coverage were
         impossible - fixed in 0.4.1 (`counts as green`); the same script
         fails 11 checks on 0.4.0.
-26. [ ] Reclassify: quick-fix session -> `state-cli reclassify --type
+26. [x] Reclassify: quick-fix session -> `state-cli reclassify --type
         bug-fix --reason "grew"` -> same session, phases kept, `status`
         shows the history; `--type docs-only` refused without `--by-operator`.
-27. [ ] `finish --no-change "<reason>"` on an untouched session -> archived
+        PASSED 13/13 on 2026-10-01 against the installed 0.4.1 (scratch
+        repo): chain becomes bug-fix with `implement` still done and its
+        artefact kept, reviews and true docs items kept, no bypass, status
+        line `reclassified: quick-fix -> bug-fix (grew)`, current phase
+        `debug`; docs-only refused without the operator, accepted with
+        `--by-operator`; `--type constructor` refused.
+27. [x] `finish --no-change "<reason>"` on an untouched session -> archived
         with outcome no-change; after a commit -> refused. Cycle 4 accepts
         only `--verdict APPROVED`.
+        PASSED 11/11 on 2026-10-01 against the installed 0.4.1 (real
+        commits, branch, stash, tag in scratch repos): untouched -> archived
+        `outcome: no-change` with the reason and no bypass; a commit ->
+        `HEAD moved`; a stash -> `ref refs/stash changed`; a branch with a
+        commit -> `branch side changed`; a lightweight tag at the base ->
+        accepted; cycle 4 NEEDS_REVISION and cycle 5 refused, cycle 4
+        APPROVED accepted and clears the gate.
 28. [x] Test runner + ship with node's own runner (`node --test
         --test-reporter=junit --test-reporter-destination=report.xml
         'test/*.test.mjs'`), passed 14/14 on 2026-10-01 in scratch repos:
