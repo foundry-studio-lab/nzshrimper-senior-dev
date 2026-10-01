@@ -23,7 +23,8 @@ Setup: `mkdir -p <scratch>/sd-smoke && cd <scratch>/sd-smoke && git init && git 
 8. [ ] /senior-dev:bypass testing the escape hatch -> next push allowed,
        bypass visible in /senior-dev:status.
 9. [ ] Codex absent/unauthed simulation (or real /codex:review) -> verdict
-       recorded via state-cli review; cycle 4 refused by CLI.
+       recorded via state-cli review; cycle 4 NEEDS_REVISION and any cycle
+       >= 5 refused by CLI; cycle 4 APPROVED accepted as the confirmation.
 10. [ ] /senior-dev:finish -> sweep evidence printed, state archived to
         .senior-dev/history/, /senior-dev:status -> "no active session".
 11. [ ] Delete throwaway repo. Zero leftovers on the machine.
@@ -61,3 +62,25 @@ Setup: `mkdir -p <scratch>/sd-smoke && cd <scratch>/sd-smoke && git init && git 
 24. [ ] `dispatch --phase implement --claude haiku` refuses ("never lowers");
         `--claude opus` without `--reason` refuses; with `--reason` records
         and `status` shows `models used:` with the raise.
+25. [ ] Test runner + ship on a REAL vitest repo (needs `junit` reporter):
+        `skills-config set-tests` with full/related/one/report -> start a
+        bug-fix, `test --affected` after an edit, `test --full` once; make a
+        test fail on the base commit too -> `test --preexisting <id>` PROVEN
+        -> `/senior-dev:ship <reason>` accepted, `status` shows the ship
+        line; a failure caused by the diff -> ship refused naming it. A
+        later commit without affected coverage -> `git push` BLOCKED.
+26. [ ] Reclassify: quick-fix session -> `state-cli reclassify --type
+        bug-fix --reason "grew"` -> same session, phases kept, `status`
+        shows the history; `--type docs-only` refused without `--by-operator`.
+27. [ ] `finish --no-change "<reason>"` on an untouched session -> archived
+        with outcome no-change; after a commit -> refused. Cycle 4 accepts
+        only `--verdict APPROVED`.
+28. [x] Test runner + ship with node's own runner (`node --test
+        --test-reporter=junit --test-reporter-destination=report.xml
+        'test/*.test.mjs'`), passed 14/14 on 2026-10-01 in scratch repos:
+        pre-existing failure proven and shipped; diff-caused failure refused;
+        same-named tests in two files refused as ambiguous; a narrowed `one`
+        command still refused at ship (repeated failing ids); a test deleted
+        on base and re-added in another file refused as a different test; a
+        directory instead of a glob (`test/`) refused as "passed no tests".
+        Re-run after any change to the proof, `parseJUnit` or `testBlockers`.

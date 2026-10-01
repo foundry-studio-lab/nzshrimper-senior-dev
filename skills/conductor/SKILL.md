@@ -1,6 +1,6 @@
 ---
 name: conductor
-description: Use at the start of ANY coding task in a git repo - implement, add, build, fix, debug, or refactor a feature, bug fix, refactor, quick fix, docs change, or investigation - and when resuming a senior-dev session. Classifies the task, routes it through the mandatory installed-skill chain (superpowers brainstorming/worktrees/plans/TDD/systematic-debugging, built-in code-review and verify, read-only Codex phase reviews), records every phase in .senior-dev/state.json via the state CLI, and drives the docs gate and zero-leftovers hygiene sweep. Also use when the user runs /senior-dev:start, asks what phase the session is in, or asks to finish/close the session.
+description: Use at the start of ANY coding task in a git repo - implement, add, build, fix, debug, or refactor a feature, bug fix, refactor, quick fix, docs change, or investigation - and when resuming a senior-dev session. Classifies the task, routes it through the mandatory installed-skill chain (superpowers brainstorming/worktrees/plans/TDD/systematic-debugging/code-review/verification, read-only Codex phase reviews), runs the scoped test loop, records every phase in .senior-dev/state.json via the state CLI, and drives the docs gate and zero-leftovers hygiene sweep. Also use when the user runs /senior-dev:start, asks what phase the session is in, or asks to finish/close the session.
 ---
 
 # senior-dev conductor
@@ -67,6 +67,19 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/state-cli.mjs" <subcommand> [flags]
 4. Classify the task as exactly one of the types below. If genuinely
    ambiguous, ask the operator ONE multiple-choice question.
 5. Initialise: `state-cli init --task "<one-line task>" --type <type>`
+6. **Skill check (fresh run only, after `init`).** Check every phase skill the
+   resolved chain names against the skills visible in this session, once. Any
+   that is not listed: record it now, not mid-run: `state-cli degrade --wanted
+   "<skill>" --used "<fallback>" --reason "not in visible skill list"`.
+7. **Test commands (once per repo, the first time a lane with an `implement`
+   phase starts; never for `docs-only` or `investigation`).** If `state-cli skills-config show` has no `tests` block,
+   ask for the commands, offering a guess from `package.json` (or the repo's
+   CLAUDE.md): `full` (required), plus `related`, `one`, `report` (a JUnit XML
+   path), `setup`, `build` where they exist. Record with
+   `state-cli skills-config set-tests --full "<cmd>" [--related "<cmd with {files}>"]
+   [--one "<cmd with {test}>"] [--report <junit.xml>] [--setup "<cmd>"] [--build "<cmd>"]`.
+   Declined: `state-cli skills-config set-tests --none` and the repo stays on
+   `tests-green`.
 
 | Type | When |
 |---|---|
@@ -78,11 +91,11 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/state-cli.mjs" <subcommand> [flags]
 | `investigation` | Read-only question answering |
 
 **Escalation rule:** a `quick-fix` that grows past 3 files or ~30 minutes is
-no longer a quick fix. Tell the operator you are escalating, then close the
-mini-session with `state-cli finish --force-open "escalating quick-fix to
-<type>"` and immediately re-init at the stricter lane in the same turn (its
-gates are still open mid-escalation - that's expected; the logged bypass
-entry is the audit trail).
+no longer a quick fix. Tell the operator you are escalating, then run
+`state-cli reclassify --type <stricter type> --reason "<why>"` in the same
+session (phases, reviews and runs are kept; the reclassification is logged
+and shown by `status`). Going to a lower lane needs the operator's yes, then
+add `--by-operator`.
 
 ## Skill source resolution
 
@@ -136,17 +149,23 @@ silently skipped.
 
 ## Gates and bypass
 
-- **Commit gate**: blocks `git commit` during `implement`/`debug` until
-  `state-cli tests-green` is recorded for that phase; blocks
-  `push`/`merge`/`gh pr create` until reviews are APPROVED, `verify` is
-  done, and the docs gate is clear.
+- **Commit gate**: blocks `git commit` during `implement`/`debug` until a
+  green `state-cli test` run is recorded for that phase (`tests-green` only
+  for repos without a tests config); blocks `push`/`merge`/`gh pr create`
+  until reviews are APPROVED, `verify` is done, the docs gate is clear,
+  and, with a tests config, the test rules hold: one full run, green or
+  waived, plus coverage on push/PR of the tree being shipped. `finish` and
+  `status` apply the same test rules. Use literal paths after `git -C` for
+  push and `gh pr create` (never `$(...)` or a variable): the gate cannot
+  expand them and judges such a push by the cwd's repo only. On repos that
+  ship, install the universal guard, which checks inside the target repo.
 - **Stop gate**: challenges any claim that the session is done (or that
   you've reached the `finish` phase) while gate items are still open.
-- The ONLY waiver is `/senior-dev:bypass <reason>` - operator-initiated
-  only; you never arm it yourself. `finish --force-open` likewise requires
-  operator sign-off - with ONE exception: the §1 escalation path, where you
-  announce the escalation and immediately re-init at the stricter lane in
-  the same turn (the logged bypass entry is the audit trail).
+- The waivers are `/senior-dev:bypass <reason>` and, for test failures
+  proven to pre-exist on the base commit only, `/senior-dev:ship <reason>` -
+  both operator-initiated only; you never arm either yourself.
+  `finish --force-open` likewise requires operator sign-off. (Escalating a
+  lane is `state-cli reclassify`, not a waiver.)
 - **Waiting on external work**: when the session is genuinely parked on
   background/external work (reviewers in flight, CI, a cloud job), arm
   `state-cli waiting --on "<what>"` before ending the turn — the stop gate
@@ -174,28 +193,54 @@ path the moment the phase's deliverable exists.
 3. `plan`: invoke `superpowers:writing-plans`. Artefact: committed plan.
 4. `implement`: invoke `superpowers:subagent-driven-development` (or
    `superpowers:executing-plans` inline) with
-   `superpowers:test-driven-development`. After each green test run:
-   `state-cli tests-green` (the commit gate requires it).
+   `superpowers:test-driven-development`. Test policy (repos with a `tests`
+   config; see also refactor and bug-fix, which follow it too):
+   - After each fix run `state-cli test --affected` (files default to what
+     changed). Use `test --one <id>` to re-check a single test. A green run
+     satisfies the commit gate; no `tests-green` needed.
+   - Run `state-cli test --full` ONCE, when implement is complete - in the
+     background when it can outlast the Bash timeout. Never run the full
+     suite a second time to check a fix; later changes are covered by
+     affected runs, which the integration gate checks at push / PR creation
+     (not at local merge).
+   - A failure outside your diff: `state-cli test --preexisting <id>` proves
+     it fails on the base commit too. Proven, and the operator wants to
+     proceed: they run `/senior-dev:ship <reason>` (operator-only); after
+     that stop chasing pre-existing failures. Not proven means your change
+     caused it - fix it. Refused as `ambiguous id` or `different test`: the
+     id names more than one test - give those tests unique names. A proof
+     counts only for the full run it was made against, so after another red
+     full run, re-prove its failures. `passed no tests` means the full
+     command didn't run the suite (with `node --test`, pass a glob such as
+     `'test/*.test.mjs'`, not a directory) - fix the command.
+   - If a run prints `CONTRADICTION: ...` STOP fixing. Show the operator both
+     tests, ask which behaviour is right, and record the answer with
+     `state-cli test --resolve <id> --reason "<answer>"`.
+   - If `build` is configured, `state-cli test --build` before shipping.
+   - Repos with no `tests` config (or `--none`) keep `state-cli tests-green`
+     after each green run.
 5. `review`: see §3.
-6. `verify`: run the built-in `verify` skill (if it isn't installed, record
-   a degrade and rely on the next step alone), then
-   `superpowers:verification-before-completion`. Record:
+6. `verify`: invoke `superpowers:verification-before-completion`. Record:
    `state-cli phase verify --status done`.
 7. `docs`: see §4.
 8. `finish`: see §5.
 
 **bug-fix** — `debug → implement → review → verify → docs → finish`
 `debug` MUST be `superpowers:systematic-debugging` — no fixes before a root
-cause. `implement` starts with a failing test reproducing the bug (TDD).
+cause. `implement` starts with a failing test reproducing the bug (TDD), and the
+test policy under feature step 4 applies.
 
 **refactor** — `worktree → plan → implement → review → verify → docs → finish`
-Record a green baseline (`state-cli tests-green`) BEFORE changing anything,
-then record it again on `implement` after each subsequent green run - the
-baseline stamp does not carry forward as proof of a later green state.
+Record a green baseline (`state-cli test --full`, or `tests-green` without a
+`tests` config) BEFORE changing anything, then record a green run on
+`implement` after each change (test policy under feature step 4) - the
+baseline stamp does not carry forward as proof of a later green state. With a
+`tests` config, that pre-change `test --full` baseline IS the lane's one full
+run; later changes need only `test --affected`, never a second full run.
 
 **quick-fix** — `implement → review → verify → docs → finish`
-No spec/plan. Review is `/code-review` as a single focused pass; no
-subagent fan-out - plus ONE Codex pass.
+No spec/plan. Review is one focused Claude pass (§3 step 1); no subagent
+fan-out - plus ONE Codex pass.
 
 **docs-only** — `implement → review → docs → finish`
 Use `elements-of-style:writing-clearly-and-concisely` (and `humanizer` where
@@ -237,10 +282,14 @@ contract. A fresh subagent inherits nothing.
 
 ## 3. Review phase (every lane except docs-only/investigation)
 
-1. Claude pass: `superpowers:requesting-code-review` + built-in `/code-review`
-   (or `/review` on older versions) on the phase diff. Fix findings via
+1. Claude pass: `superpowers:requesting-code-review` on the phase diff. Use
+   `/code-review` as well ONLY when a skill of that exact name is in this
+   session's skill list, and note which one ran (`state-cli degrade` if the
+   chosen skill was missing). For lanes with a committed spec, brief the
+   reviewer: "compare the diff to it and report missing requirements, scope
+   beyond it, and behaviour that contradicts it as concerns." Fix findings via
    `superpowers:systematic-debugging` + TDD, never by patching blind.
-   - Record: `state-cli review --phase <phase> --reviewer claude --verdict <V> --cycle <n>`
+   - Record: `state-cli review --phase <phase> --reviewer claude --verdict <V> --cycle <n> --skill <the skill that ran>`
 2. Codex pass (READ-ONLY, never `--write`):
    - Capture `git status --porcelain` and `git log -1 --format=%H` BEFORE.
    - Read the effort: `state-cli models --phase review` for a per-phase pass,
@@ -253,8 +302,8 @@ contract. A fresh subagent inherits nothing.
      Not found → run `/codex:review` instead and record
      `state-cli degrade --wanted "codex task --effort" --used "/codex:review" --reason "companion script not found"`.
    - Run `node <that path> task --fresh --effort <effort> "<prompt>"` with the
-     prompt built from `references/codex-review-prompt.md` (fill the diff range
-     and phase). It asks for the JSON verdict as the only reply and tells Codex
+     prompt built from `references/codex-review-prompt.md` (fill the diff range,
+     phase, and `<SPEC>` - the committed spec path, or `none`). It asks for the JSON verdict as the only reply and tells Codex
      to check any repo document or policy the diff touches.
      `/codex:adversarial-review` stays available to the operator directly.
    - Reply isn't the exact JSON contract? Re-ask ONCE for JSON-only. Still
@@ -265,8 +314,10 @@ contract. A fresh subagent inherits nothing.
 3. `NEEDS_REVISION` → address concerns → re-review at cycle n+1. Cycle
    counters restart at 1 for each new `--phase` value - they don't carry
    over from a prior phase's reviews. **Cycle cap is 3** (the CLI enforces
-   it). At the cap: stop iterating, present both positions to the operator,
-   let them decide.
+   it). After cycle-3 fixes, cycle 4 may be recorded ONLY as `--verdict
+   APPROVED` (the confirming pass); a cycle-4 NEEDS_REVISION or any cycle 5+
+   is refused. At that point: stop iterating, present both positions to the
+   operator, let them decide.
 
 3a. **Adjudication (split verdict).** When the two reviewers' latest
    verdicts for the phase differ, do not start cycle `n+1` yet:
@@ -311,8 +362,9 @@ Steps 1-2 apply only to lanes with a diff to integrate. `docs-only` skips
 step 1 (no Codex pass on prose). `investigation` skips both 1 and 2 (no
 branch exists) and goes straight to the sweep.
 
-1. Final review passes - Claude `/code-review` + read-only Codex - over the
-   complete branch diff, same procedure and recording as §3, recorded as
+1. Final review passes - Claude (§3 step 1 naming rules) + read-only Codex - over the
+   complete branch diff, same procedure and recording as §3 (the Claude
+   record carries `--skill <the skill that ran>`), recorded as
    `--phase finish`. Where the lane had a single implement phase already
    reviewed in full (§3), scope the final pass to integration diffs and
    unreviewed deltas rather than re-reviewing the same code — record it
@@ -323,7 +375,10 @@ branch exists) and goes straight to the sweep.
    (track them during the session with `state-cli scratch --add <path>`).
    Where a remote exists, verify the pushed end, not just local state.
 4. `state-cli finish` — archives state to `.senior-dev/history/` (refuses
-   if gate items are still open; see "Gates and bypass").
+   if gate items are still open; see "Gates and bypass"). When nothing needed
+   doing (no commits, no new branches, clean tree, no extra worktrees), close
+   with `state-cli finish --no-change "<reason>"` instead; it verifies that
+   itself and refuses otherwise.
 5. Report to the operator with the sweep evidence pasted verbatim — actual
    command output, never assertions — and the `models used:` and
    `adjudications:` lines from `state-cli status` when present.

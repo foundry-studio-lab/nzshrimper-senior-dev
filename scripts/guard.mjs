@@ -8,11 +8,24 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   findRepoRoot, readState, hasActiveSession, currentPhase,
-  integrationBlockers, consumeBypass,
+  integrationBlockers, testBlockers, consumeBypass, readSkillsConfig, headTree, headCommit,
 } from './state-lib.mjs';
 
 const TEST_GATED_PHASES = new Set(['implement', 'debug']);
 const INTEGRATION_HOOKS = new Set(['pre-push', 'pre-merge-commit']);
+
+// pre-push stdin: `<local ref> <local sha> <remote ref> <remote sha>` per
+// ref. Deletes (all-zero local sha) ship nothing. No lines at all (stdin
+// lost or absent) falls back to HEAD; only deletes -> undefined (no check).
+// Returns {trees, heads}: heads[i] is the commit of trees[i].
+function pushed() {
+  let input = '';
+  try { if (!process.stdin.isTTY) input = readFileSync(0, 'utf8'); } catch {}
+  const lines = input.split('\n').map((l) => l.trim().split(/\s+/)).filter((f) => f.length >= 4);
+  if (!lines.length) return { trees: [headTree(process.cwd())], heads: [headCommit(process.cwd())] };
+  const shas = lines.map((f) => f[1]).filter((sha) => !/^0+$/.test(sha));
+  return shas.length ? { trees: shas.map((sha) => headTree(process.cwd(), sha)), heads: shas } : { trees: undefined };
+}
 
 function warnOpen(msg) {
   console.error(`senior-dev guard: ${msg} - failing open`);
@@ -33,6 +46,10 @@ try {
   // token meant for one hook can never be replayed against another later.
   const expectedTokenType = INTEGRATION_HOOKS.has(hookName) ? 'integration'
     : hookName === 'pre-commit' ? 'commit' : null;
+  // pre-push is the exception: the Claude Code gate checked the target
+  // checkout's HEAD, not the shas actually pushed, so a non-bypassed token
+  // still gets the test rules evaluated against what is pushed.
+  let tokenAllowed = false;
   if (expectedTokenType) {
     const tokenPath = join(dirname(fileURLToPath(import.meta.url)), 'pass.json');
     try {
@@ -40,14 +57,17 @@ try {
       unlinkSync(tokenPath); // single-use, consumed (or purged) on sight - even corrupt
       const tok = JSON.parse(raw);
       if (tok.type === expectedTokenType && new Date(tok.expiresAt) > new Date()) {
-        process.exit(0);
+        if (hookName !== 'pre-push' || tok.bypassed === true) process.exit(0);
+        tokenAllowed = true;
       }
     } catch {}
   }
 
   let blockMsg = null;
   if (INTEGRATION_HOOKS.has(hookName)) {
-    const blockers = integrationBlockers(state);
+    const ctx = { tests: readSkillsConfig(repoRoot)?.tests };
+    if (hookName === 'pre-push') Object.assign(ctx, pushed());
+    const blockers = tokenAllowed ? testBlockers(state, ctx) : integrationBlockers(state, ctx);
     if (blockers.length) {
       blockMsg = `integration blocked (${blockers.length} item${blockers.length > 1 ? 's' : ''}):\n- ${blockers.join('\n- ')}`;
     }

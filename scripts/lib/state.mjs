@@ -16,6 +16,9 @@ export const CHAINS = {
   'investigation': ['investigate', 'finish'],
 };
 
+// Own-key check: `CHAINS['constructor']` is truthy, so a bare lookup is not a lane test.
+export const isLane = (t) => typeof t === 'string' && Object.hasOwn(CHAINS, t);
+
 // false = required and missing; true = done; null = waived for this lane.
 export const DOCS_GATE = {
   'feature':       { spec: false, plan: false, handover: false, affectedDocs: false },
@@ -25,6 +28,9 @@ export const DOCS_GATE = {
   'docs-only':     { handover: false },
   'investigation': {},
 };
+
+// How much process a lane demands; `reclassify` needs the operator to lower it.
+export const LANE_RANK = { investigation: 0, 'docs-only': 1, 'quick-fix': 2, 'bug-fix': 3, refactor: 3, feature: 4 };
 
 // Lanes where a recorded review is not demanded before integration.
 const REVIEW_EXEMPT = new Set(['docs-only', 'investigation']);
@@ -52,6 +58,18 @@ export function findRepoRoot(cwd = process.cwd()) {
       cwd, stdio: ['ignore', 'pipe', 'ignore'],
     }).toString().trim();
     return out || null;
+  } catch {
+    return null;
+  }
+}
+
+// The tree of HEAD (or `rev`) in the checkout at cwd; null when there are
+// no commits or git fails.
+export function headTree(cwd, rev = 'HEAD') {
+  try {
+    return execFileSync('git', ['rev-parse', '--verify', '-q', `${rev}^{tree}`], {
+      cwd, stdio: ['ignore', 'pipe', 'ignore'],
+    }).toString().trim() || null;
   } catch {
     return null;
   }
@@ -105,6 +123,15 @@ export function validModels(models) {
   return true;
 }
 
+const TEST_KEYS = ['related', 'one', 'report', 'setup', 'build'];
+export function validTests(t) {
+  if (!isPlainObject(t)) return false;
+  const keys = Object.keys(t);
+  if (keys.length === 1 && keys[0] === 'none') return t.none === true;
+  return typeof t.full === 'string' && t.full !== ''
+    && keys.every((k) => k === 'full' || (TEST_KEYS.includes(k) && typeof t[k] === 'string'));
+}
+
 export function skillsConfigPath(repoRoot) {
   return join(repoRoot, '.senior-dev', 'skills.json');
 }
@@ -113,7 +140,8 @@ export function readSkillsConfig(repoRoot) {
   try {
     const c = JSON.parse(readFileSync(skillsConfigPath(repoRoot), 'utf8'));
     if (typeof c !== 'object' || c === null) return null;
-    if (![1, 2, 3].includes(c.version)) return null;
+    if (![1, 2, 3, 4].includes(c.version)) return null;
+    if (c.tests !== undefined && !validTests(c.tests)) return null;
     if (c.models !== undefined && !validModels(c.models)) return null;
     if (c.source !== undefined && !VALID_SOURCES.includes(c.source)) return null;
     if (c.guard !== undefined && !['installed', 'declined'].includes(c.guard)) return null;
@@ -167,7 +195,7 @@ export function resolveModel(cfg, laneType, phase) {
 // optional models block is present, so machines on v0.2 keep reading
 // files that never used it.
 export function stampVersion(cfg) {
-  cfg.version = cfg.models !== undefined ? 3 : 2;
+  cfg.version = cfg.tests !== undefined ? 4 : cfg.models !== undefined ? 3 : 2;
   return cfg;
 }
 
@@ -260,7 +288,68 @@ export function openGateItems(state) {
   return items;
 }
 
-export function integrationBlockers(state) {
+// Spec §3.3: with a `tests` config, integration needs one full run F (the
+// latest), F green or every failure proven pre-existing with `ship` armed,
+// and - only when the action ships code (ctx.trees given) - every shipped
+// tree covered by F or a later green affected run. [] when no tests config.
+export function testBlockers(state, ctx = {}) {
+  const tests = ctx?.tests;
+  if (!isPlainObject(tests) || tests.none) return [];
+  const runs = state.testRuns || [];
+  const F = runs.filter((r) => r.kind === 'full').reduce((m, r) => (!m || r.id > m.id ? r : m), null);
+  if (!F) return ['no full test run recorded (state-cli test --full)'];
+  if (F.exit !== 0) {
+    if (!Array.isArray(F.failures) || F.failures.length === 0) {
+      return [`full test run #${F.id} failed and its failures are unknown (no JUnit report)`];
+    }
+    // A red run with no passing test is a runner that did not run the suite
+    // (its one synthetic failure reproduces on base and would prove itself).
+    if (F.passedCount === 0) {
+      return [`full test run #${F.id} passed no tests - the runner may not have run the suite; fix the full command, then state-cli test --full`];
+    }
+    // One proof covers one test: a failing id listed twice is two tests, and
+    // narrowing the `one` command could prove the wrong one.
+    const dup = [...new Set(F.failures.filter((t, i) => F.failures.indexOf(t) !== i))];
+    if (dup.length) {
+      return [`full test run #${F.id} has ambiguous failing ids: ${dup.join(', ')} - give those tests unique names, then state-cli test --full`];
+    }
+    // A proof holds for the full run it was made against: a later red full
+    // run may report the same id from another test, so it needs a re-proof.
+    const proven = new Set(runs.filter((r) => r.kind === 'preexisting' && r.proven === true && r.sinceFull === F.id).map((r) => r.test));
+    const unproven = F.failures.filter((t) => !proven.has(t));
+    if (unproven.length) {
+      return [`full test run #${F.id} has ${unproven.length} failing test(s) not proven pre-existing: ${unproven.join(', ')}`];
+    }
+    if (!state.ship) return [`full test run #${F.id} failures are all pre-existing; waiving them needs /senior-dev:ship`];
+  }
+  const trees = ctx.trees;
+  if (!Array.isArray(trees)) return [];
+  const covered = (tree) => tree != null && (F.tree === tree || runs.some((r) => r.kind === 'affected'
+    && r.exit === 0 && r.sinceFull === F.id && r.tree === tree));
+  if (trees.length && trees.every(covered)) return [];
+  const out = [`current tree is not covered by a green test run since full run #${F.id} (state-cli test --affected)`];
+  // ctx.heads[i] is the commit of trees[i]. The latest run at that commit
+  // but another tree means the run saw uncommitted changes.
+  const R = runs.filter((r) => r.kind === 'full' || r.kind === 'affected').reduce((m, r) => (!m || r.id > m.id ? r : m), null);
+  const heads = Array.isArray(ctx.heads) ? ctx.heads : [];
+  if (R?.head && trees.some((t, i) => !covered(t) && heads[i] === R.head && R.tree !== t)) {
+    out.push('working tree has changes not in HEAD: commit or remove them, then state-cli test --affected');
+  }
+  return out;
+}
+
+// The commit sha of `rev` in the checkout at cwd; null on any git failure.
+export function headCommit(cwd, rev = 'HEAD') {
+  try {
+    return execFileSync('git', ['rev-parse', '--verify', '-q', `${rev}^{commit}`], {
+      cwd, stdio: ['ignore', 'pipe', 'ignore'],
+    }).toString().trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+export function integrationBlockers(state, ctx = {}) {
   const blockers = [];
   for (const [phase, v] of Object.entries(latestVerdicts(state))) {
     if (v !== 'APPROVED') blockers.push(`review for '${phase}' is ${v}, not APPROVED`);
@@ -274,6 +363,7 @@ export function integrationBlockers(state) {
   for (const [k, v] of Object.entries(state.docsGate || {})) {
     if (v === false) blockers.push(`docs gate item '${k}' incomplete`);
   }
+  blockers.push(...testBlockers(state, ctx));
   return blockers;
 }
 
@@ -290,7 +380,7 @@ export function ensureExcluded(repoRoot) {
 
     // Lines we manage. skills.json is excluded only when NOT shared; the
     // guard bundle is machine-local (installed per-clone), always excluded.
-    const want = ['.senior-dev/state.json', '.senior-dev/history/', '.senior-dev/guard/'];
+    const want = ['.senior-dev/state.json', '.senior-dev/history/', '.senior-dev/guard/', '.senior-dev/junit.xml'];
     if (!shared) want.push('.senior-dev/skills.json');
 
     // Start from existing lines, drop the legacy wholesale line and any of
@@ -299,7 +389,7 @@ export function ensureExcluded(repoRoot) {
     const managed = new Set([
       '.senior-dev/', '.senior-dev/state.json',
       '.senior-dev/history/', '.senior-dev/skills.json',
-      '.senior-dev/guard/',
+      '.senior-dev/guard/', '.senior-dev/junit.xml',
     ]);
     const kept = cur.split('\n').filter((l) => l !== '' && !managed.has(l));
     const out = [...kept, ...want];

@@ -1,6 +1,7 @@
 # Codex review prompt (read-only, JSON-first)
 
-Fill `<RANGE>` (e.g. `v0.2.1..HEAD` or `<sha>..HEAD`) and `<PHASE>`, then pass
+Fill `<RANGE>` (e.g. `v0.2.1..HEAD` or `<sha>..HEAD`), `<PHASE>`, and `<SPEC>`
+(the committed spec's path, or `none`), then pass
 the whole block as the single prompt argument of
 `codex-companion.mjs task --fresh --effort <effort>`.
 
@@ -14,6 +15,8 @@ Review the diff for correctness, missed cases, and regressions. Read any
 repository document or policy the change could affect (README, CHANGELOG,
 PRIVACY, docs/, the plugin manifest) and flag any claim the diff makes
 false.
+
+Spec: <SPEC>. For lanes with a committed spec, compare the diff to it and report missing requirements, scope beyond it, and behaviour that contradicts it as concerns.
 
 Reply with ONLY this JSON object, no prose, no code fence:
 {"verdict":"APPROVED"|"NEEDS_REVISION","concerns":[{"id":"1","file":"<path>","line":<n>,"text":"<concern>"}],"missedCases":[],"suggestions":[]}

@@ -1,5 +1,88 @@
 # Changelog
 
+## 0.4.0 — 2026-10-01
+
+Friction pass. An audit of 441 archived sessions found the bypasses
+clustering in five places; each is now a first-class, logged operation.
+
+- Test runner (optional `tests` block in `skills.json`, schema v4, written
+  by `skills-config set-tests`). `state-cli test` runs `--affected`, `--one`,
+  `--full`, `--build` and records every run with the tree it covered. The
+  integration gate wants ONE green full run, then only affected tests for
+  later changes, checked at push / PR creation (not at local merge). A repo
+  with no `tests` config, or `set-tests --none`, behaves exactly as 0.3.1.
+- A run's tree fingerprint keeps the real index's mtime on its temporary
+  copy, so a same-size edit made just after the last index write is not
+  recorded as the old content (git's racily-clean check stays in force).
+- `test --affected` works before a repo's first commit (every file counts as
+  affected; the empty tree is asked of git, so SHA-256 repos work too), and
+  after a full run taken before it, when it diffs against the tree that run
+  tested, so deletions still force the full suite (or runs the full suite if
+  that tree has been pruned).
+- `test --affected` runs the full suite when any file was deleted (or
+  renamed away) since the base, and whenever its file list is empty at a
+  tree the latest full run did not cover. Explicit files add to the
+  changed-file list instead of replacing it.
+- `finish` and `status` apply the test rules too: a local merge of an
+  untested tree can no longer be finished and pushed later with the session
+  gone. A coverage blocker names uncommitted changes when that is the cause.
+- The gate classifier keeps quoted flag values in place (`git -C "/a b"
+  push`, `git -c 'k=v' push`, `gh --repo "o/r" pr create`); a `-C` holding a
+  command substitution or variable fails coverage closed in the cwd's
+  session (the gate cannot expand it; see spec §9 — use literal `-C` paths),
+  and `git -C <repo> push` is judged by that repo's session (the `-C` target
+  wins over cwd's repo). The quoted-value fix applies to repos without a
+  tests config too and only blocks more (those commands used to slip past
+  the review, verify and docs gates); the target-wins rule means a push into
+  a repo with no session is no longer judged by the cwd's session.
+- A command touching several repos (`git push && git -C /repo/B push`) is
+  judged per repo: each repo's pushes against its own session, tests config
+  and bypass, blocked if any repo blocks, with each blocking repo named. A
+  bypass armed in one repo never waives another.
+- `set-tests` warns when `--report` points inside the repo at a path that is
+  not git-ignored.
+- `test --preexisting <id>` proves a failure also fails on the session's base
+  commit (temporary worktree, JUnit report required). Never proven by a crash,
+  nor when two testcases in either report share the id (node's reporter uses
+  classname `test` for every file, so same-named tests collide), nor when the
+  failure comes from a different file on base than on HEAD. A red full run
+  whose failing ids repeat, or whose report passed no tests (a misconfigured
+  runner), cannot be waived. A proof counts only for the full run it was made
+  against; a later red full run needs its failures re-proved.
+- `CONTRADICTION` stop: a test that fails, passes, then fails again in a
+  phase halts the fix loop until the operator answers (`test --resolve`).
+- `/senior-dev:ship <reason>` (operator-only) waives proven pre-existing
+  failures for the session. Reviews, verify and the docs gate still apply.
+- `state-cli reclassify --type <t> --reason` changes lane in the same
+  session, replacing the force-open escalation. It needs no operator only when
+  the new lane's rank is same-or-higher and it removes no docs-gate key the
+  current lane has; lowering, or dropping gate items (refactor to bug-fix
+  drops spec, plan), needs `--by-operator`. `init` records `baseHead`/`baseRefs`.
+- Review cycle 4 records only a confirming APPROVED. `finish --no-change
+  "<reason>"` closes a session that changed nothing, after the CLI checks
+  HEAD, branches, tags, the stash, the working tree and worktrees against the
+  baseline taken at `init`.
+- `state-cli review --skill <name>` records which Claude review skill ran.
+- The conductor names only skills that exist: `superpowers:verification-before-completion`
+  for verify, `superpowers:requesting-code-review` for the Claude pass
+  (`/code-review` only when that exact skill is listed), and checks phase
+  skills against the visible list once at engage. Review prompts gain a
+  spec axis (`<SPEC>` in the Codex prompt).
+
+Upgrade note: existing universal-guard installs keep the old pre-push shim
+until it is refreshed. The version bump makes `state-cli guard status`
+report `stale`, which the conductor's resume step refreshes with
+`state-cli guard install`; run it yourself to pick up the new pre-push shim
+(it buffers stdin so a chained prior hook and the guard both see the pushed
+refs).
+
+Compatibility: `skills.json` becomes version 4 only when it has a `tests`
+block (including `set-tests --none`). senior-dev 0.3.x reads a v4 file as
+absent, so a SHARED, committed v4 skills.json looks unconfigured to a
+teammate still on 0.3.x until they upgrade.
+
+Known ceilings are listed in the spec (section 9).
+
 ## 0.3.1 — 2026-09-14
 
 Hygiene pass over the 0.3.0 CLI: the inputs below used to be dropped or

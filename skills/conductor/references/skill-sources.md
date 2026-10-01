@@ -11,7 +11,7 @@ conductor's "Skill source resolution"); never install without a yes.
 |---|---|---|
 | `superpowers:*` (brainstorming, writing-plans, using-git-worktrees, test-driven-development, subagent-driven-development, executing-plans, systematic-debugging, requesting-code-review, verification-before-completion, finishing-a-development-branch) | `claude plugin marketplace add obra/superpowers` then `claude plugin install superpowers@superpowers-marketplace` | The canonical process chain. One install covers every `superpowers:*` step. |
 | `codex:*` review lanes (`/codex:review`, `/codex:adversarial-review`) | `claude plugin marketplace add openai/codex` then `claude plugin install codex@codex` | Read-only review lanes only. Never the write-capable `codex-rescue`. |
-| Built-ins (`/code-review`, `/review`, `verify`) | none — ship with Claude Code | If absent on an older build, degrade to `superpowers:verification-before-completion` for verify and `superpowers:requesting-code-review` for review. |
+| `/code-review` | none — use it only when a skill of exactly that name is in the session's skill list (it resolves to different skills on different machines) | The Claude review pass is `superpowers:requesting-code-review`; record which skill ran with `state-cli review --skill`. The verify phase is `superpowers:verification-before-completion`. |
 
 **Restart caveat:** a newly installed plugin's skills and hooks load on the
 **next Claude Code restart** — they are not usable in the current session even

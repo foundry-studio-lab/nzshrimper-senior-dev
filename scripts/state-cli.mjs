@@ -6,15 +6,16 @@ import {
   existsSync, mkdirSync, renameSync, readFileSync, writeFileSync,
   copyFileSync, chmodSync, unlinkSync,
 } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { join, dirname, relative, resolve, isAbsolute, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  CHAINS, DOCS_GATE, findRepoRoot, readState, writeState, statePath,
+  CHAINS, DOCS_GATE, LANE_RANK, isLane, findRepoRoot, readState, writeState, statePath,
   hasActiveSession, currentPhase, latestVerdicts, latestReview, openGateItems, ensureExcluded,
   VALID_SOURCES, readSkillsConfig, writeSkillsConfig, resolveConfiguredSkill, normalizeLaneValue,
-  stampVersion, resolveModel, MODEL_PHASES, CLAUDE_TIERS, CODEX_EFFORTS, TIER_RANK,
+  stampVersion, validTests, headTree, testBlockers, resolveModel, MODEL_PHASES, CLAUDE_TIERS, CODEX_EFFORTS, TIER_RANK,
 } from './lib/state.mjs';
 import { codexUpdateNotice } from './lib/codex-check.mjs';
+import { runTest, provePreexisting, reprintContradictions, resolveContradiction } from './lib/test-runner.mjs';
 
 function fail(msg) {
   console.error(`senior-dev: ${msg}`);
@@ -93,11 +94,14 @@ function hooksDir(repoRoot) {
 }
 
 function shimSource(hookName) {
+  // pre-push gets the pushed refs on stdin; buffer them so a chained prior
+  // hook and the guard both see them.
+  const pp = hookName === 'pre-push';
   return `#!/bin/sh
 ${SHIM_MARK} (${hookName}) - installed by the senior-dev plugin; 'state-cli guard uninstall' removes it.
 HOOK_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-if [ -x "$HOOK_DIR/${hookName}.pre-senior-dev" ]; then
-  "$HOOK_DIR/${hookName}.pre-senior-dev" "$@" || exit $?
+${pp ? 'IN=$(cat)\n' : ''}if [ -x "$HOOK_DIR/${hookName}.pre-senior-dev" ]; then
+  ${pp ? 'printf \'%s\\n\' "$IN" | ' : ''}"$HOOK_DIR/${hookName}.pre-senior-dev" "$@" || exit $?
 fi
 COMMON_DIR=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
 [ -n "$COMMON_DIR" ] || exit 0
@@ -106,7 +110,7 @@ GUARD="$REPO_ROOT/.senior-dev/guard/guard.mjs"
 STATE_LIB="$REPO_ROOT/.senior-dev/guard/state-lib.mjs"
 if [ ! -f "$GUARD" ] || [ ! -f "$STATE_LIB" ]; then echo "senior-dev guard: bundle missing - failing open" >&2; exit 0; fi
 if ! command -v node >/dev/null 2>&1; then echo "senior-dev guard: node not found - failing open" >&2; exit 0; fi
-exec node "$GUARD" ${hookName} "$@"
+${pp ? 'printf \'%s\\n\' "$IN" | ' : ''}exec node "$GUARD" ${hookName} "$@"
 `;
 }
 
@@ -170,6 +174,20 @@ function requireSession(repoRoot) {
   return state;
 }
 
+// openGateItems plus the §3.3 test rules, for finish and status. Coverage of
+// the main checkout's HEAD only when it moved off baseHead (a local merge
+// that a later push would ship with the session gone). No tests config:
+// exactly openGateItems.
+function openItems(repoRoot, state) {
+  const items = openGateItems(state);
+  const tests = readSkillsConfig(repoRoot)?.tests;
+  if (!tests || tests.none) return items;
+  let head = null;
+  try { head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repoRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch { /* no commits */ }
+  const trees = head !== (state.baseHead ?? null) ? [headTree(repoRoot)] : undefined;
+  return [...items, ...testBlockers(state, { tests, trees, heads: [head] }).map((b) => `tests: ${b}`)];
+}
+
 function git(repoRoot, args) {
   try {
     return execFileSync('git', args, { cwd: repoRoot, encoding: 'utf8' }).trimEnd();
@@ -189,12 +207,26 @@ switch (cmd) {
   case 'init': {
     requireValues('init', flags, ['task', 'type']);
     if (!flags.task) fail('init needs --task');
-    if (!CHAINS[flags.type]) fail(`init needs --type, one of: ${Object.keys(CHAINS).join(', ')}`);
+    if (!isLane(flags.type)) fail(`init needs --type, one of: ${Object.keys(CHAINS).join(', ')}`);
     const existing = readState(repoRoot);
     if (hasActiveSession(existing)) fail(`a session is already active ('${existing.task}'); finish or bypass it first`);
+    let baseHead = null;
+    const baseRefs = {};
+    try {
+      baseHead = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repoRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    } catch { /* no commits yet */ }
+    try {
+      const refs = execFileSync('git', ['for-each-ref', '--format=%(refname) %(objectname)', 'refs/heads', 'refs/tags', 'refs/stash'], { cwd: repoRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+      for (const line of refs.split('\n')) {
+        const [name, sha] = line.trim().split(' ');
+        if (name && sha) baseRefs[name] = sha;
+      }
+    } catch { /* leave empty */ }
     const state = {
       version: 1,
       task: flags.task,
+      baseHead,
+      baseRefs,
       type: flags.type,
       startedAt: new Date().toISOString(),
       worktree: null,
@@ -237,6 +269,42 @@ switch (cmd) {
     console.log(`tests green recorded on phase '${cur}'`);
     break;
   }
+  case 'test': {
+    const state = requireSession(repoRoot);
+    requireValues('test', flags, ['one', 'preexisting', 'resolve', 'reason']);
+    const cfg = readSkillsConfig(repoRoot);
+    if (!cfg?.tests || cfg.tests.none) fail('no tests config - run skills-config set-tests, or use tests-green');
+    if (flags.resolve !== undefined) {
+      if (typeof flags.reason !== 'string' || !flags.reason) fail('test --resolve needs --reason "<text>"');
+      try { resolveContradiction(state, flags.resolve, flags.reason); } catch (e) { fail(e.message); }
+      writeState(repoRoot, state);
+      console.log(`contradiction resolved: ${flags.resolve}`);
+      break;
+    }
+    const modes = ['affected', 'one', 'full', 'build', 'preexisting'].filter((m) => flags[m] !== undefined);
+    if (modes.length !== 1) fail('test needs exactly one of --affected [files...] | --one <id> | --full | --build | --preexisting <id> | --resolve <id> --reason "<text>"');
+    const kind = modes[0];
+    // parseFlags hands the first token after --affected to it as a value; every
+    // non-flag token after --affected is a file.
+    const files = kind === 'affected' ? rest.slice(rest.indexOf('--affected') + 1).filter((a) => !a.startsWith('--')) : undefined;
+    let cwd;
+    try { cwd = execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); }
+    catch { fail('not inside a git repository'); }
+    if (kind === 'preexisting') {
+      let proof;
+      try { proof = provePreexisting({ cwd, state, cfg, test: flags.preexisting }); }
+      catch (e) { fail(e.message); }
+      writeState(repoRoot, state);
+      console.log(`preexisting ${flags.preexisting}: ${proof.proven ? 'PROVEN' : 'NOT PROVEN'} - ${proof.reason}`);
+      process.exit(proof.proven ? 0 : 1);
+    }
+    let result;
+    try { result = runTest({ repoRoot, cwd, state, cfg, kind, files, test: kind === 'one' ? flags.one : undefined }); }
+    catch (e) { fail(e.message); }
+    if (kind === 'one' || kind === 'affected') reprintContradictions(state, result.run.id);
+    writeState(repoRoot, state);
+    process.exit(result.exit);
+  }
   case 'review': {
     const state = requireSession(repoRoot);
     if (flags.overrule !== undefined || flags.uphold !== undefined) {
@@ -245,6 +313,7 @@ switch (cmd) {
       if (flags.uphold !== undefined && flags.uphold !== true) fail('review --uphold does not take a value');
       const decision = flags.overrule === true ? 'overruled' : 'upheld';
       const flagName = decision === 'overruled' ? '--overrule' : '--uphold';
+      if (flags.skill !== undefined) fail(`review ${flagName} does not take --skill - it names the review skill on a verdict record`);
       if (flags.verdict !== undefined) fail(`review ${flagName} does not take --verdict - it adjudicates the verdict already recorded at that cycle`);
       requireValues('review', flags, ['phase', 'reviewer', 'cycle', 'reason', 'by']);
       if (!flags.phase) fail('review needs --phase <name>');
@@ -275,19 +344,22 @@ switch (cmd) {
       console.log(`adjudication recorded: ${flags.phase} cycle ${cycle} ${flags.reviewer} ${decision} (by ${by})`);
       break;
     }
-    requireValues('review', flags, ['phase', 'reviewer', 'verdict', 'cycle']);
+    requireValues('review', flags, ['phase', 'reviewer', 'verdict', 'cycle', 'skill']);
+    if (flags.skill !== undefined && !flags.skill.trim()) fail('review --skill needs a non-empty skill name');
     if (!flags.phase) fail('review needs --phase <name>');
     if (!['codex', 'claude'].includes(flags.reviewer)) fail('review needs --reviewer codex|claude');
     if (!['APPROVED', 'NEEDS_REVISION'].includes(flags.verdict)) fail('review needs --verdict APPROVED|NEEDS_REVISION');
     const cycleRaw = flags.cycle === undefined ? '1' : flags.cycle;
-    if (!/^[0-9]+$/.test(cycleRaw) || parseInt(cycleRaw, 10) < 1) fail('review needs --cycle as a positive integer 1-3');
+    if (!/^[0-9]+$/.test(cycleRaw) || parseInt(cycleRaw, 10) < 1) fail('review needs --cycle as a positive integer 1-4 (4 only as the confirming APPROVED)');
     const cycle = parseInt(cycleRaw, 10);
-    if (cycle > 3) fail('cycle cap is 3 - stop iterating and escalate to the operator');
+    // Cycle 4 is the one confirming pass after cycle-3 fixes: APPROVED only.
+    if (cycle > 4 || (cycle === 4 && flags.verdict !== 'APPROVED')) fail('cycle cap is 3 - stop iterating and escalate to the operator');
     const dup = (state.reviews || []).find((r) => r.phase === flags.phase && r.reviewer === flags.reviewer && (r.cycle ?? 1) === cycle);
     if (dup) fail(`review already recorded for ${flags.reviewer} on '${flags.phase}' at cycle ${cycle} (${dup.verdict}) - record the next cycle instead`);
     state.reviews.push({
       phase: flags.phase, reviewer: flags.reviewer, verdict: flags.verdict,
       cycle, at: new Date().toISOString(),
+      ...(flags.skill !== undefined && { skill: flags.skill.trim() }),
     });
     writeState(repoRoot, state);
     console.log(`review recorded: ${flags.phase} cycle ${cycle} -> ${flags.verdict}`);
@@ -389,6 +461,36 @@ switch (cmd) {
     console.log(`bypass armed (one-shot) - reason logged: ${reason}`);
     break;
   }
+  case 'ship': {
+    const state = requireSession(repoRoot);
+    const stdinFlag = flags['reason-stdin'];
+    if (stdinFlag !== undefined && stdinFlag !== true) fail('ship --reason-stdin does not take a value');
+    const useStdin = stdinFlag === true;
+    const hasReason = typeof flags.reason === 'string';
+    if (useStdin === hasReason) fail('ship needs exactly one of --reason "<why>" or --reason-stdin');
+    const reason = useStdin ? (await readStdin()).trim() : flags.reason.trim();
+    if (!reason) fail('ship needs a non-empty reason');
+    if (state.ship) fail('ship already armed');
+    const cfg = readSkillsConfig(repoRoot);
+    if (!cfg?.tests || cfg.tests.none) fail('no tests config - nothing to waive');
+    let cwd;
+    try { cwd = execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); }
+    catch { fail('not inside a git repository'); }
+    const tree = headTree(cwd);
+    const runs = state.testRuns || [];
+    const F = runs.filter((r) => r.kind === 'full').reduce((m, r) => (!m || r.id > m.id ? r : m), null);
+    if (F && F.exit === 0) fail('full run is green - nothing to waive');
+    // Reuse the gate's own rules as if armed: what it still reports is what ship must refuse on.
+    const refusals = testBlockers({ ...state, ship: {} }, { tests: cfg.tests, trees: [tree] });
+    if (refusals.length) fail(`cannot ship: ${refusals.join('; ')}`);
+    if (cfg.tests.build && !runs.some((r) => r.kind === 'build' && r.exit === 0 && r.tree === tree)) {
+      fail('cannot ship: build is configured and there is no green build at the current tree (state-cli test --build)');
+    }
+    state.ship = { reason, at: new Date().toISOString(), fullRun: F.id };
+    writeState(repoRoot, state);
+    console.log(`ship armed - waives only proven pre-existing failures of full run #${F.id}; reviews, verify and docs still gate. Reason logged: ${reason}`);
+    break;
+  }
   case 'waiting': {
     const state = requireSession(repoRoot);
     requireValues('waiting', flags, ['on']);
@@ -420,6 +522,34 @@ switch (cmd) {
     }
     break;
   }
+  case 'reclassify': {
+    const state = requireSession(repoRoot);
+    requireValues('reclassify', flags, ['type', 'reason']);
+    if (flags['by-operator'] !== undefined && flags['by-operator'] !== true) fail('reclassify --by-operator does not take a value');
+    if (!isLane(flags.type)) fail(`reclassify needs --type, one of: ${Object.keys(CHAINS).join(', ')}`);
+    if (!isLane(state.type)) fail(`session type '${state.type}' is not a known lane - reclassify refused`);
+    if (!flags.reason || !flags.reason.trim()) fail('reclassify needs --reason "<why>"');
+    if (flags.type === state.type) fail(`session is already ${state.type}`);
+    const byOperator = flags['by-operator'] === true;
+    if (LANE_RANK[flags.type] < LANE_RANK[state.type] && !byOperator) {
+      fail(`reclassifying ${state.type} -> ${flags.type} lowers the lane; it needs the operator's yes (--by-operator)`);
+    }
+    const dropped = Object.keys(state.docsGate || {}).filter((k) => !(k in DOCS_GATE[flags.type]));
+    if (dropped.length && !byOperator) {
+      fail(`reclassifying ${state.type} -> ${flags.type} drops gate items (${dropped.join(', ')}); it needs the operator's yes (--by-operator)`);
+    }
+    const from = state.type;
+    const fresh = DOCS_GATE[flags.type];
+    state.docsGate = { ...fresh, ...Object.fromEntries(Object.keys(fresh).filter((k) => state.docsGate?.[k] === true).map((k) => [k, true])) };
+    state.type = flags.type;
+    state.chain = CHAINS[flags.type];
+    state.reclassifications = state.reclassifications || [];
+    state.reclassifications.push({ from, to: flags.type, reason: flags.reason, byOperator, at: new Date().toISOString() });
+    writeState(repoRoot, state);
+    console.log(`reclassified: ${from} -> ${flags.type}`);
+    console.log(`chain: ${state.chain.join(' -> ')}`);
+    break;
+  }
   case 'scratch': {
     const state = requireSession(repoRoot);
     requireValues('scratch', flags, ['add']);
@@ -441,6 +571,7 @@ switch (cmd) {
     console.log(`# senior-dev session\n`);
     console.log(`task:   ${state.task}`);
     console.log(`type:   ${state.type}`);
+    for (const r of state.reclassifications || []) console.log(`reclassified: ${r.from} -> ${r.to} (${r.reason})${r.byOperator ? ' [operator]' : ''}`);
     console.log(`phase:  ${currentPhase(state) || '(all done)'}\n`);
     if (state.waiting) console.log(`WAITING on: ${state.waiting.on} (since ${state.waiting.at})\n`);
     if (state.skillSource) {
@@ -471,8 +602,9 @@ switch (cmd) {
     }
     if (state.bypasses.length) console.log(`bypasses used: ${state.bypasses.map((b) => `${b.action}: ${b.reason}`).join('; ')}`);
     if (state.bypassArmed) console.log(`bypass ARMED: ${state.bypassArmed.reason}`);
+    if (state.ship) console.log(`SHIP armed: ${state.ship.reason} (full run #${state.ship.fullRun})`);
     if ((state.waits || []).length) console.log(`past waits: ${state.waits.length}`);
-    const open = openGateItems(state);
+    const open = openItems(repoRoot, state);
     console.log(open.length ? `open gate items (${open.length}):\n  - ${open.join('\n  - ')}` : 'all gates clear.');
     break;
   }
@@ -501,11 +633,48 @@ switch (cmd) {
     // it (the external work finished) or it was abandoned. --force-open is
     // for open GATE items with an operator sign-off; it does not apply here.
     if (state.waiting) fail(`finish refused - still waiting on: ${state.waiting.on} - clear it first or the wait was abandoned`);
+    if (flags['no-change'] !== undefined) {
+      const reason = flags['no-change'];
+      if (typeof reason !== 'string' || !reason.trim()) fail('finish --no-change needs a non-empty reason');
+      if (flags['force-open'] !== undefined) fail('finish --no-change cannot be combined with --force-open');
+      if (typeof state.baseHead !== 'string') fail('finish --no-change needs a session recorded by 0.4+ with a base commit - use finish or finish --force-open');
+      const g = (...a) => {
+        try { return execFileSync('git', a, { cwd: repoRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }); }
+        catch (e) { return fail(`finish --no-change refused - git ${a[0]} failed: ${e.message.split('\n')[0]}`); }
+      };
+      const head = g('rev-parse', 'HEAD').trim();
+      if (head !== state.baseHead) fail(`finish --no-change refused - HEAD moved: ${state.baseHead.slice(0, 7)} -> ${head.slice(0, 7)}`);
+      const now = {};
+      for (const line of g('for-each-ref', '--format=%(refname) %(objectname)', 'refs/heads', 'refs/tags', 'refs/stash').split('\n')) {
+        const [name, sha] = line.trim().split(' ');
+        if (name) now[name] = sha;
+      }
+      const base = state.baseRefs || {};
+      for (const name of new Set([...Object.keys(base), ...Object.keys(now)])) {
+        if (base[name] !== undefined ? base[name] !== now[name] : now[name] !== state.baseHead) {
+          fail(`finish --no-change refused - ${name.startsWith('refs/heads/') ? `branch ${name.slice(11)}` : `ref ${name}`} changed`);
+        }
+      }
+      if (g('status', '--porcelain').trim()) fail('finish --no-change refused - working tree not clean');
+      const extra = g('worktree', 'list', '--porcelain').split('\n').filter((l) => l.startsWith('worktree ')).slice(1);
+      if (extra.length) fail(`finish --no-change refused - extra worktree: ${extra[0].slice('worktree '.length)}`);
+      state.outcome = 'no-change';
+      state.noChangeReason = reason.trim();
+      state.closedAt = new Date().toISOString();
+      const slug = state.task.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'session';
+      const histDir = join(repoRoot, '.senior-dev', 'history');
+      mkdirSync(histDir, { recursive: true });
+      const dest = join(histDir, `${state.closedAt.replace(/[:.]/g, '-')}-${slug}.json`);
+      writeState(repoRoot, state);
+      renameSync(statePath(repoRoot), dest);
+      console.log(`session closed (no change) and archived: ${dest}`);
+      break;
+    }
     // Running `finish` completes the chain's final phase, so mark it done
     // BEFORE computing open gate items - otherwise phase:finish would always
     // read as open and every close would demand --force-open.
     state.phases.finish = { ...(state.phases.finish || {}), status: 'done' };
-    const open = openGateItems(state);
+    const open = openItems(repoRoot, state);
     if (open.length) {
       const forceOpen = flags['force-open'];
       if (forceOpen === undefined) {
@@ -632,6 +801,7 @@ switch (cmd) {
       if (existing.guard !== undefined) cfg.guard = existing.guard;
       if (existing.lanes !== undefined) cfg.lanes = existing.lanes;
       if (existing.models !== undefined) cfg.models = existing.models;
+      if (existing.tests !== undefined) cfg.tests = existing.tests;
       stampVersion(cfg);
       writeSkillsConfig(repoRoot, cfg);
       ensureExcluded(repoRoot);
@@ -650,7 +820,7 @@ switch (cmd) {
     }
     if (sub === 'set-lane') {
       const lane = positional[1];
-      if (!CHAINS[lane]) fail(`set-lane needs a lane, one of: ${Object.keys(CHAINS).join(', ')}`);
+      if (!isLane(lane)) fail(`set-lane needs a lane, one of: ${Object.keys(CHAINS).join(', ')}`);
       requireValues('skills-config set-lane', flags, ['steps']);
       if (typeof flags.steps !== 'string') fail("set-lane needs --steps 'phase=skill|fallback,...'");
       const laneMap = {};
@@ -680,9 +850,9 @@ switch (cmd) {
       let lane = typeof flags.lane === 'string' ? flags.lane : null;
       if (!lane) {
         const st = readState(repoRoot);
-        lane = (hasActiveSession(st) && CHAINS[st.type]) ? st.type : 'feature';
+        lane = (hasActiveSession(st) && isLane(st.type)) ? st.type : 'feature';
       }
-      if (!CHAINS[lane]) fail(`resolve --lane must be one of: ${Object.keys(CHAINS).join(', ')}`);
+      if (!isLane(lane)) fail(`resolve --lane must be one of: ${Object.keys(CHAINS).join(', ')}`);
       const cfg = readSkillsConfig(repoRoot);
       console.log(`# resolved skills - lane: ${lane} (source: ${cfg?.source || 'superpowers'})`);
       for (const phase of CHAINS[lane]) {
@@ -699,9 +869,9 @@ switch (cmd) {
       let lane = typeof flags.lane === 'string' ? flags.lane : null;
       if (!lane) {
         const st = readState(repoRoot);
-        lane = (hasActiveSession(st) && CHAINS[st.type]) ? st.type : 'feature';
+        lane = (hasActiveSession(st) && isLane(st.type)) ? st.type : 'feature';
       }
-      if (!CHAINS[lane]) fail(`models --lane must be one of: ${Object.keys(CHAINS).join(', ')}`);
+      if (!isLane(lane)) fail(`models --lane must be one of: ${Object.keys(CHAINS).join(', ')}`);
       const cfg = readSkillsConfig(repoRoot);
       console.log(`# resolved models - lane: ${lane}`);
       for (const phase of [...CHAINS[lane], 'adjudicate']) {
@@ -716,7 +886,7 @@ switch (cmd) {
     if (sub === 'set-models') {
       requireValues('skills-config set-models', flags, ['steps', 'lane']);
       const lane = typeof flags.lane === 'string' ? flags.lane : null;
-      if (lane && !CHAINS[lane]) fail(`set-models --lane must be one of: ${Object.keys(CHAINS).join(', ')}`);
+      if (lane && !isLane(lane)) fail(`set-models --lane must be one of: ${Object.keys(CHAINS).join(', ')}`);
       if (typeof flags.steps !== 'string') fail("set-models needs --steps 'phase=<claude>[/<codex>],...'");
       const allowed = lane ? [...CHAINS[lane], 'adjudicate'] : MODEL_PHASES;
       const map = parseModelSteps(flags.steps, allowed);
@@ -732,7 +902,33 @@ switch (cmd) {
       console.log(`models ${lane ? `lane '${lane}'` : 'steps'}: ${JSON.stringify(target)}`);
       break;
     }
-    fail('skills-config needs a subcommand: show | set | share | unshare | set-lane | resolve | models | set-models');
+    if (sub === 'set-tests') {
+      const keys = ['full', 'related', 'one', 'report', 'setup', 'build'];
+      requireValues('skills-config set-tests', flags, keys);
+      const given = keys.filter((k) => flags[k] !== undefined);
+      let tests;
+      if (flags.none !== undefined) {
+        if (given.length) fail('set-tests --none cannot be combined with other flags');
+        tests = { none: true };
+      } else {
+        if (flags.full === undefined) fail('set-tests needs --full <command> or --none');
+        tests = Object.fromEntries(given.map((k) => [k, flags[k]]));
+        if (!validTests(tests)) fail('set-tests --full needs a non-empty command');
+      }
+      const cfg = readSkillsConfig(repoRoot) || { source: 'superpowers', shared: false };
+      cfg.tests = tests;
+      stampVersion(cfg);
+      writeSkillsConfig(repoRoot, cfg);
+      ensureExcluded(repoRoot);
+      console.log(`tests config: ${JSON.stringify(tests)}`);
+      const rel = tests.report ? relative(repoRoot, resolve(repoRoot, tests.report)) : '';
+      if (rel && rel !== '.senior-dev/junit.xml' && rel !== '..' && !rel.startsWith('../') && !rel.startsWith(`..${sep}`) && !isAbsolute(rel)) {
+        try { execFileSync('git', ['check-ignore', '-q', rel], { cwd: repoRoot, stdio: 'ignore' }); }
+        catch { console.error(`senior-dev: report path ${tests.report} is not git-ignored - add it to .gitignore so it is never committed`); }
+      }
+      break;
+    }
+    fail('skills-config needs a subcommand: show | set | share | unshare | set-lane | resolve | models | set-models | set-tests');
     break;
   }
   case 'skill-source': {
@@ -754,5 +950,5 @@ switch (cmd) {
     break;
   }
   default:
-    fail(`unknown subcommand '${cmd || ''}'. Use: init|phase|tests-green|review|models|dispatch|docs|degrade|bypass|waiting|scratch|skills-config|skill-source|guard|status|sweep|finish`);
+    fail(`unknown subcommand '${cmd || ''}'. Use: init|phase|tests-green|test|review|models|dispatch|docs|degrade|bypass|ship|waiting|reclassify|scratch|skills-config|skill-source|guard|status|sweep|finish`);
 }

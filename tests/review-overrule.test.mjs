@@ -107,3 +107,16 @@ test('--overrule and --uphold refuse a --verdict, so a verdict is never dropped 
   assert.deepEqual(readState(repo).adjudications, []);
   assert.equal(readState(repo).reviews.length, 2);
 });
+
+test('C7: review --skill is stored on the record; absent when not given; refused with --overrule/--uphold', () => {
+  const repo = makeRepo();
+  cli(repo, ['init', '--task', 't', '--type', 'quick-fix']);
+  assert.equal(cli(repo, ['review', '--phase', 'implement', '--reviewer', 'claude', '--verdict', 'NEEDS_REVISION', '--cycle', '1', '--skill', 'code-review:code-review']).status, 0);
+  review(repo, 'codex', 'NEEDS_REVISION');
+  const [c, x] = readState(repo).reviews;
+  assert.equal(c.skill, 'code-review:code-review');
+  assert.ok(!('skill' in x));
+  assert.equal(cli(repo, [...OVER, '--skill', 'x']).status, 1);
+  assert.equal(cli(repo, ['review', '--phase', 'implement', '--reviewer', 'codex', '--cycle', '1', '--uphold', '--reason', 'r', '--skill', 'x']).status, 1);
+  assert.equal(cli(repo, ['review', '--phase', 'implement', '--reviewer', 'claude', '--verdict', 'APPROVED', '--cycle', '2', '--skill']).status, 1);
+});
