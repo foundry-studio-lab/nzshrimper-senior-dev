@@ -252,6 +252,48 @@ test('--affected after a full run taken before the first commit still sees commi
   assert.ok(run.files.includes('b.js'), JSON.stringify(run));
 });
 
+// v0.4.1: a red full run whose only failure is proven pre-existing.
+function provenRed() {
+  const t = setup();
+  t.setReport(xml([pass('s', 'ok'), failing('s', 'legacy')])); t.setExit(1);
+  assert.equal(cli(t.dir, ['test', '--full']).status, 1);
+  const p = join(t.dir, '.senior-dev', 'state.json');
+  const s = JSON.parse(readFileSync(p, 'utf8'));
+  const F = s.testRuns.at(-1);
+  s.testRuns.push({ id: F.id + 1, kind: 'preexisting', test: 's > legacy', proven: true, exit: 1, tree: F.tree, sinceFull: F.id });
+  writeFileSync(p, JSON.stringify(s));
+  return t;
+}
+
+test('v0.4.1: an affected run red only on proven pre-existing failures stamps the commit gate', () => {
+  const t = provenRed();
+  writeFileSync(join(t.dir, 'a.js'), '2');
+  const r = cli(t.dir, ['test', '--affected']);
+  assert.equal(r.status, 1, 'the command exit is reported as-is');
+  assert.match(r.out, /red only on proven pre-existing failures \(s > legacy\) - counts as green/);
+  const s = readState(t.dir);
+  assert.equal(s.testRuns.at(-1).provenOnly, true);
+  assert.ok(s.phases.implement?.testsGreenAt, 'commit gate satisfied');
+});
+
+test('v0.4.1: a red run with any other failure does not stamp the commit gate', () => {
+  const t = provenRed();
+  t.setReport(xml([pass('s', 'ok'), failing('s', 'legacy'), failing('s', 'new')]));
+  writeFileSync(join(t.dir, 'a.js'), '2');
+  cli(t.dir, ['test', '--affected']);
+  const s = readState(t.dir);
+  assert.notEqual(s.testRuns.at(-1).provenOnly, true);
+  assert.equal(s.phases.implement?.testsGreenAt, undefined);
+});
+
+test('v0.4.1: an unchanged tree after a proven-red full run is nothing to run (no full rerun)', () => {
+  const t = provenRed();
+  const before = t.markers().length;
+  assert.equal(cli(t.dir, ['test', '--affected']).status, 0);
+  assert.equal(readState(t.dir).testRuns.at(-1).kind, 'affected');
+  assert.equal(t.markers().length, before, 'no command ran');
+});
+
 test('--affected defaults to files changed since the last full run', () => {
   const t = setup();
   assert.equal(cli(t.dir, ['test', '--full']).status, 0);

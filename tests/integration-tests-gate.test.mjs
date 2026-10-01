@@ -72,6 +72,34 @@ test('all failures proven + ship armed: no test blocker', () => {
   assert.deepEqual(integrationBlockers(s, ctx), []);
 });
 
+test('v0.4.1: an affected run red only on proven pre-existing failures covers the tree when ship is armed', () => {
+  // The full run is at an older tree; the later affected run re-runs the
+  // still-failing pre-existing test, so it can never be exit 0.
+  const runs = [full(1, { exit: 1, failures: ['a > x'], passedCount: 3, tree: 'old' }), pre(2, 'a > x'),
+    aff(3, { exit: 1, failures: ['a > x'], passedCount: 2 })];
+  assert.deepEqual(integrationBlockers(clearState({ testRuns: runs, ship: SHIP }), ctx), []);
+});
+
+test('v0.4.1: an affected run with any unproven, unknown or no-pass failure does not cover', () => {
+  const F = full(1, { exit: 1, failures: ['a > x'], passedCount: 3, tree: 'old' });
+  for (const a of [
+    aff(3, { exit: 1, failures: ['a > x', 'a > y'], passedCount: 2 }), // a diff-caused failure too
+    aff(3, { exit: 1, failures: null, passedCount: null }), // no report
+    aff(3, { exit: 1, failures: ['a > x'], passedCount: 0 }), // ran nothing real
+    aff(3, { exit: 1, failures: ['a > x', 'a > x'], passedCount: 2 }), // ambiguous
+  ]) {
+    const b = integrationBlockers(clearState({ testRuns: [F, pre(2, 'a > x'), a], ship: SHIP }), ctx);
+    assert.ok(b.some((x) => x.startsWith('current tree is not covered')), JSON.stringify({ a, b }));
+  }
+});
+
+test('v0.4.1: without ship, a red-only-on-proven affected run still does not clear the gate', () => {
+  const runs = [full(1, { exit: 1, failures: ['a > x'], passedCount: 3, tree: 'old' }), pre(2, 'a > x'),
+    aff(3, { exit: 1, failures: ['a > x'], passedCount: 2 })];
+  const b = integrationBlockers(clearState({ testRuns: runs }), ctx);
+  assert.deepEqual(b, ['full test run #1 failures are all pre-existing; waiving them needs /senior-dev:ship']);
+});
+
 test('green full at the current tree: no test blocker', () => {
   assert.deepEqual(integrationBlockers(clearState({ testRuns: [full(1)] }), ctx), []);
 });

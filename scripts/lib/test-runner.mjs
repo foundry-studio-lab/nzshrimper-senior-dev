@@ -3,7 +3,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, copyFileSync, existsSync, rmSync, readFileSync, statSync, utimesSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
-import { currentPhase, headTree } from './state.mjs';
+import { currentPhase, headTree, onlyProvenFailures } from './state.mjs';
 
 export { headTree };
 
@@ -167,7 +167,8 @@ export function runTest({ repoRoot, cwd, state, cfg, kind, files, test }) {
   let nothing = false;
   if (kind === 'affected' && cmdKind === 'affected' && runFiles.length === 0) {
     const F = last('full');
-    nothing = F ? F.tree === tree && F.exit === 0 : typeof state.baseHead === 'string';
+    // A full run red only on proven pre-existing failures counts like green.
+    nothing = F ? F.tree === tree && (F.exit === 0 || onlyProvenFailures(state, F, F)) : typeof state.baseHead === 'string';
     if (!nothing) cmdKind = 'full';
   }
   if (cmdKind === 'full') template = t.full;
@@ -178,8 +179,16 @@ export function runTest({ repoRoot, cwd, state, cfg, kind, files, test }) {
     ...runBase(state), kind: cmdKind, cmd, files: runFiles, test: test ?? null, exit,
     failures: parsed ? parsed.failed : null, passedCount: parsed ? parsed.passed.length : null, head, tree, phase, at,
   };
+  // A scoped run red only on failures proven pre-existing against the latest
+  // full run re-ran a known failure: it satisfies the commit gate. (A new full
+  // run's failures need re-proving against it first.)
+  const priorFull = last('full');
+  if (exit !== 0 && cmdKind !== 'full' && kind !== 'build' && onlyProvenFailures(state, run, priorFull)) {
+    run.provenOnly = true;
+    console.log(`test run #${run.id}: red only on proven pre-existing failures (${run.failures.join(', ')}) - counts as green`);
+  }
   state.testRuns.push(run);
-  if (exit === 0 && kind !== 'build') state.phases[phase] = { ...(state.phases[phase] || { status: 'in_progress' }), testsGreenAt: at };
+  if ((exit === 0 || run.provenOnly) && kind !== 'build') state.phases[phase] = { ...(state.phases[phase] || { status: 'in_progress' }), testsGreenAt: at };
 
   state.testHistory = state.testHistory || {};
   state.contradictions = state.contradictions || [];

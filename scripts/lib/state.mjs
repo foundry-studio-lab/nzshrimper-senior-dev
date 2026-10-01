@@ -292,6 +292,22 @@ export function openGateItems(state) {
 // latest), F green or every failure proven pre-existing with `ship` armed,
 // and - only when the action ships code (ctx.trees given) - every shipped
 // tree covered by F or a later green affected run. [] when no tests config.
+// Ids proven pre-existing against full run F (a proof holds only for the
+// full run it was made against).
+export function provenAgainst(state, F) {
+  return new Set((state.testRuns || []).filter((r) => r.kind === 'preexisting' && r.proven === true && r.sinceFull === F.id).map((r) => r.test));
+}
+
+// A red run whose report parsed, passed something, names each failure once,
+// and fails only on tests proven pre-existing against F: it re-ran a known
+// failure, not one the diff caused, so it counts like green.
+export function onlyProvenFailures(state, run, F) {
+  if (!F || run.exit === 0 || !Array.isArray(run.failures) || run.failures.length === 0) return false;
+  if (!(run.passedCount > 0) || new Set(run.failures).size !== run.failures.length) return false;
+  const proven = provenAgainst(state, F);
+  return run.failures.every((t) => proven.has(t));
+}
+
 export function testBlockers(state, ctx = {}) {
   const tests = ctx?.tests;
   if (!isPlainObject(tests) || tests.none) return [];
@@ -315,7 +331,7 @@ export function testBlockers(state, ctx = {}) {
     }
     // A proof holds for the full run it was made against: a later red full
     // run may report the same id from another test, so it needs a re-proof.
-    const proven = new Set(runs.filter((r) => r.kind === 'preexisting' && r.proven === true && r.sinceFull === F.id).map((r) => r.test));
+    const proven = provenAgainst(state, F);
     const unproven = F.failures.filter((t) => !proven.has(t));
     if (unproven.length) {
       return [`full test run #${F.id} has ${unproven.length} failing test(s) not proven pre-existing: ${unproven.join(', ')}`];
@@ -324,8 +340,11 @@ export function testBlockers(state, ctx = {}) {
   }
   const trees = ctx.trees;
   if (!Array.isArray(trees)) return [];
+  // With ship armed, an affected run red only on F's proven pre-existing
+  // failures covers its tree (it cannot be exit 0 while those still fail).
+  const green = (r) => r.exit === 0 || (state.ship && onlyProvenFailures(state, r, F));
   const covered = (tree) => tree != null && (F.tree === tree || runs.some((r) => r.kind === 'affected'
-    && r.exit === 0 && r.sinceFull === F.id && r.tree === tree));
+    && green(r) && r.sinceFull === F.id && r.tree === tree));
   if (trees.length && trees.every(covered)) return [];
   const out = [`current tree is not covered by a green test run since full run #${F.id} (state-cli test --affected)`];
   // ctx.heads[i] is the commit of trees[i]. The latest run at that commit
