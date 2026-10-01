@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, readFileSync, existsSync, mkdirSync, rmSync, utimesSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, existsSync, mkdirSync, rmSync, utimesSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -253,17 +253,102 @@ test('--affected after a full run taken before the first commit still sees commi
 });
 
 // v0.4.1: a red full run whose only failure is proven pre-existing.
-function provenRed() {
-  const t = setup();
-  t.setReport(xml([pass('s', 'ok'), failing('s', 'legacy')])); t.setExit(1);
+function provenRed({ related = true, report } = {}) {
+  const t = setup({ related });
+  t.setReport(report || xml([pass('s', 'ok'), failing('s', 'legacy')])); t.setExit(1);
   assert.equal(cli(t.dir, ['test', '--full']).status, 1);
+  t.prove = (file) => {
+    const p = join(t.dir, '.senior-dev', 'state.json');
+    const s = JSON.parse(readFileSync(p, 'utf8'));
+    const F = [...s.testRuns].reverse().find((r) => r.kind === 'full');
+    s.testRuns.push({ id: s.testRuns.length + 1, kind: 'preexisting', test: 's > legacy', proven: true, exit: 1, tree: F.tree, sinceFull: F.id, ...(file !== undefined ? { file } : {}) });
+    writeFileSync(p, JSON.stringify(s));
+  };
+  t.prove();
+  return t;
+}
+// Reporters write absolute realpaths (/private/var on macOS).
+const legacyIn = (dir, f) => `<testcase classname="s" name="legacy" file="${realpathSync(dir)}/${f}"><failure message="x"/></testcase>`;
+
+test('v0.4.1 c2: a same-id failure from another file is not proven-only (file identity)', () => {
+  const t = setup();
+  t.setReport(xml([pass('s', 'ok'), legacyIn(t.dir, 'test/a.test.mjs')])); t.setExit(1);
+  cli(t.dir, ['test', '--full']);
   const p = join(t.dir, '.senior-dev', 'state.json');
   const s = JSON.parse(readFileSync(p, 'utf8'));
   const F = s.testRuns.at(-1);
-  s.testRuns.push({ id: F.id + 1, kind: 'preexisting', test: 's > legacy', proven: true, exit: 1, tree: F.tree, sinceFull: F.id });
+  s.testRuns.push({ id: 2, kind: 'preexisting', test: 's > legacy', proven: true, exit: 1, tree: F.tree, sinceFull: F.id, file: 'test/a.test.mjs' });
   writeFileSync(p, JSON.stringify(s));
-  return t;
-}
+  t.setReport(xml([pass('s', 'ok'), legacyIn(t.dir, 'test/b.test.mjs')]));
+  writeFileSync(join(t.dir, 'a.js'), '2');
+  cli(t.dir, ['test', '--affected']);
+  assert.notEqual(readState(t.dir).testRuns.at(-1).provenOnly, true);
+  // Same file: proven-only.
+  t.setReport(xml([pass('s', 'ok'), legacyIn(t.dir, 'test/a.test.mjs')]));
+  writeFileSync(join(t.dir, 'a.js'), '3');
+  cli(t.dir, ['test', '--affected']);
+  assert.equal(readState(t.dir).testRuns.at(-1).provenOnly, true);
+});
+
+test('v0.4.1 c2: without a related command, the escalated full run then nothing-to-run stamps the gate', () => {
+  const t = provenRed({ related: false });
+  writeFileSync(join(t.dir, 'a.js'), '2');
+  cli(t.dir, ['test', '--affected']); // escalates to a full run at the new tree
+  assert.equal(readState(t.dir).testRuns.at(-1).kind, 'full');
+  t.prove();
+  const before = t.markers().length;
+  cli(t.dir, ['test', '--affected']);
+  const s = readState(t.dir);
+  assert.equal(s.testRuns.at(-1).kind, 'affected');
+  assert.equal(t.markers().length, before, 'nothing ran');
+  assert.ok(s.phases.implement?.testsGreenAt);
+});
+
+test('v0.4.1 c2: after a deletion, the escalated full run then nothing-to-run stamps the gate', () => {
+  const t = provenRed();
+  rmSync(join(t.dir, 'b.js'));
+  cli(t.dir, ['test', '--affected']);
+  assert.equal(readState(t.dir).testRuns.at(-1).kind, 'full');
+  t.prove();
+  cli(t.dir, ['test', '--affected']);
+  const s = readState(t.dir);
+  assert.equal(s.testRuns.at(-1).kind, 'affected');
+  assert.ok(s.phases.implement?.testsGreenAt);
+});
+
+test('v0.4.1 c2: a proof for an id that did not fail in the full run does not make a run proven-only', () => {
+  const t = setup();
+  t.setReport(xml([pass('s', 'ok'), pass('s', 'legacy')])); t.setExit(0);
+  cli(t.dir, ['test', '--full']); // green F
+  const p = join(t.dir, '.senior-dev', 'state.json');
+  const s = JSON.parse(readFileSync(p, 'utf8'));
+  const F = s.testRuns.at(-1);
+  s.testRuns.push({ id: 2, kind: 'preexisting', test: 's > legacy', proven: true, exit: 1, tree: F.tree, sinceFull: F.id });
+  delete s.phases.implement;
+  writeFileSync(p, JSON.stringify(s));
+  t.setReport(xml([pass('s', 'ok'), failing('s', 'legacy')])); t.setExit(1);
+  writeFileSync(join(t.dir, 'a.js'), '2');
+  cli(t.dir, ['test', '--affected']);
+  assert.notEqual(readState(t.dir).testRuns.at(-1).provenOnly, true);
+  assert.equal(readState(t.dir).phases.implement?.testsGreenAt, undefined);
+});
+
+test('v0.4.1 c2: a --one run red only on a proven id is proven-only', () => {
+  const t = provenRed();
+  const r = cli(t.dir, ['test', '--one', 's > legacy']);
+  assert.match(r.out, /counts as green/);
+  assert.equal(readState(t.dir).testRuns.at(-1).provenOnly, true);
+});
+
+test('v0.4.1 c2: an unchanged tree after a full run with an unproven failure still runs full', () => {
+  const t = setup();
+  t.setReport(xml([pass('s', 'ok'), failing('s', 'legacy')])); t.setExit(1);
+  cli(t.dir, ['test', '--full']); // red, nothing proven
+  const before = t.markers().length;
+  cli(t.dir, ['test', '--affected']);
+  assert.equal(readState(t.dir).testRuns.at(-1).kind, 'full');
+  assert.equal(t.markers().length, before + 1);
+});
 
 test('v0.4.1: an affected run red only on proven pre-existing failures stamps the commit gate', () => {
   const t = provenRed();

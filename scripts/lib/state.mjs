@@ -288,26 +288,32 @@ export function openGateItems(state) {
   return items;
 }
 
-// Spec §3.3: with a `tests` config, integration needs one full run F (the
-// latest), F green or every failure proven pre-existing with `ship` armed,
-// and - only when the action ships code (ctx.trees given) - every shipped
-// tree covered by F or a later green affected run. [] when no tests config.
-// Ids proven pre-existing against full run F (a proof holds only for the
-// full run it was made against).
+// Proofs (passing preexisting runs) made against full run F: a proof holds
+// only for the full run it was made against.
+const proofsAgainst = (state, F) => (state.testRuns || []).filter((r) => r.kind === 'preexisting' && r.proven === true && r.sinceFull === F.id);
 export function provenAgainst(state, F) {
-  return new Set((state.testRuns || []).filter((r) => r.kind === 'preexisting' && r.proven === true && r.sinceFull === F.id).map((r) => r.test));
+  return new Set(proofsAgainst(state, F).map((r) => r.test));
 }
 
 // A red run whose report parsed, passed something, names each failure once,
-// and fails only on tests proven pre-existing against F: it re-ran a known
-// failure, not one the diff caused, so it counts like green.
+// and fails only on tests that failed in F and were proven pre-existing
+// against F from the same file: it re-ran a known failure, not one the diff
+// caused, so it counts like green. File identity matches the proof's rule:
+// same file, or no file on either side (id-only runners); one-sided refuses.
 export function onlyProvenFailures(state, run, F) {
   if (!F || run.exit === 0 || !Array.isArray(run.failures) || run.failures.length === 0) return false;
   if (!(run.passedCount > 0) || new Set(run.failures).size !== run.failures.length) return false;
-  const proven = provenAgainst(state, F);
-  return run.failures.every((t) => proven.has(t));
+  const inF = new Set(F.failures || []);
+  const proofs = proofsAgainst(state, F);
+  return run.failures.every((t) => inF.has(t)
+    && proofs.some((p) => p.test === t && (p.file ?? '') === (run.failureFiles?.[t] ?? '')));
 }
 
+// Spec §3.3: with a `tests` config, integration needs one full run F (the
+// latest), F green or every failure proven pre-existing with `ship` armed,
+// and - only when the action ships code (ctx.trees given) - every shipped
+// tree covered by F or a later green affected run (or, with ship armed, one
+// red only on F's proven failures). [] when no tests config.
 export function testBlockers(state, ctx = {}) {
   const tests = ctx?.tests;
   if (!isPlainObject(tests) || tests.none) return [];

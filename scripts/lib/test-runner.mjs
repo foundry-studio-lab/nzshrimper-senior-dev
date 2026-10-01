@@ -25,6 +25,16 @@ const attr = (tag, k) => {
   return m ? decode(m[1]) : '';
 };
 
+// A failing testcase's file, relative to the checkout it ran in (reporters
+// write absolute realpaths: /private/var on macOS), joined when repeated.
+const realOr = (p) => { try { return realpathSync(p); } catch { return p; } };
+const relFile = (f, roots) => {
+  const r = roots.find((x) => f.startsWith(x + sep));
+  return r ? f.slice(r.length + 1) : f;
+};
+const fileOf = (parsed, id, roots) => (parsed?.files?.[id] || []).map((f) => relFile(f, roots)).join(',');
+const failureFileMap = (parsed, roots) => Object.fromEntries(parsed.failed.map((id) => [id, fileOf(parsed, id, roots)]));
+
 export function parseJUnit(xmlText) {
   const passed = [], failed = [], skipped = [], files = {};
   const re = /<testcase\b([^>]*?)(\/>|>([\s\S]*?)<\/testcase>)/g;
@@ -125,7 +135,17 @@ export function runTest({ repoRoot, cwd, state, cfg, kind, files, test }) {
   let runFiles = [];
   let template;
   let deleted = false;
-  if (kind === 'affected') {
+  const report = t.report && kind !== 'build' ? resolve(cwd, t.report) : null;
+  if (report) rmSync(report, { force: true });
+  // Snapshot head/tree BEFORE the command: files it writes must not enter the tree.
+  const head = headSha(cwd);
+  const tree = wouldCommitTree(cwd);
+  // Nothing changed since a full run that is green, or red only on proven
+  // pre-existing failures: nothing to run. Checked before any escalation to
+  // full (no `related`, a deletion), which would otherwise rerun forever.
+  const F0 = last('full');
+  let nothing = kind === 'affected' && !!F0 && F0.tree === tree && (F0.exit === 0 || onlyProvenFailures(state, F0, F0));
+  if (kind === 'affected' && !nothing) {
     if (!t.related) cmdKind = 'full';
     else {
       // A full run taken before the first commit has no head: diff against
@@ -156,19 +176,11 @@ export function runTest({ repoRoot, cwd, state, cfg, kind, files, test }) {
     if (!t.build) throw new Error("no 'build' command configured - run skills-config set-tests --build");
     template = t.build;
   }
-  const report = t.report && kind !== 'build' ? resolve(cwd, t.report) : null;
-  if (report) rmSync(report, { force: true });
-  // Snapshot head/tree BEFORE the command: files it writes must not enter the tree.
-  const head = headSha(cwd);
-  const tree = wouldCommitTree(cwd);
-
-  // An empty list is "nothing to run" only at the latest full run's tree, or
-  // with no full run yet when nothing changed since baseHead; else run full.
-  let nothing = false;
-  if (kind === 'affected' && cmdKind === 'affected' && runFiles.length === 0) {
-    const F = last('full');
-    // A full run red only on proven pre-existing failures counts like green.
-    nothing = F ? F.tree === tree && (F.exit === 0 || onlyProvenFailures(state, F, F)) : typeof state.baseHead === 'string';
+  // An empty list is "nothing to run" only at the latest full run's tree
+  // (handled above), or with no full run yet when nothing changed since
+  // baseHead; else run full.
+  if (!nothing && kind === 'affected' && cmdKind === 'affected' && runFiles.length === 0) {
+    nothing = !F0 && typeof state.baseHead === 'string';
     if (!nothing) cmdKind = 'full';
   }
   if (cmdKind === 'full') template = t.full;
@@ -177,7 +189,8 @@ export function runTest({ repoRoot, cwd, state, cfg, kind, files, test }) {
   const at = new Date().toISOString();
   const run = {
     ...runBase(state), kind: cmdKind, cmd, files: runFiles, test: test ?? null, exit,
-    failures: parsed ? parsed.failed : null, passedCount: parsed ? parsed.passed.length : null, head, tree, phase, at,
+    failures: parsed ? parsed.failed : null, passedCount: parsed ? parsed.passed.length : null,
+    failureFiles: parsed ? failureFileMap(parsed, [cwd, realOr(cwd)]) : null, head, tree, phase, at,
   };
   // A scoped run red only on failures proven pre-existing against the latest
   // full run re-ran a known failure: it satisfies the commit gate. (A new full
@@ -266,14 +279,8 @@ export function provePreexisting({ cwd, state, cfg, test }) {
   let reason;
   // Same id from a different file (a test deleted on base, a same-named one
   // added on HEAD) is a different test. Paths are compared per checkout.
-  const rel = (f, roots) => {
-    const r = roots.find((x) => f.startsWith(x + sep));
-    return r ? f.slice(r.length + 1) : f;
-  };
-  const fileOf = (p, roots) => (p?.files?.[test] || []).map((f) => rel(f, roots)).join(',');
-  const real = (p) => { try { return realpathSync(p); } catch { return p; } };
-  const hf = fileOf(onHead.parsed, [cwd, real(cwd)]);
-  const bf = fileOf(onBase.parsed, [tmp, tmpReal]);
+  const hf = fileOf(onHead.parsed, test, [cwd, realOr(cwd)]);
+  const bf = fileOf(onBase.parsed, test, [tmp, tmpReal]);
   if (shared) reason = `ambiguous id: ${count(shared[1], test)} testcases in the ${shared[0]} report share it - make test names unique`;
   else if (h === 'passed') reason = 'passes on HEAD - nothing to prove';
   else if (h !== 'failed') reason = `absent from the HEAD report: ${h} (exit ${onHead.exit})`;
@@ -287,7 +294,7 @@ export function provePreexisting({ cwd, state, cfg, test }) {
   const run = {
     ...runBase(state), kind: 'preexisting', cmd, files: [], test, exit: onHead.exit,
     failures: onHead.parsed ? onHead.parsed.failed : null, head, tree, phase,
-    at: new Date().toISOString(), proven, reason, base,
+    at: new Date().toISOString(), proven, reason, base, file: hf,
   };
   state.testRuns.push(run);
   return { proven, reason, run };
