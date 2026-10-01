@@ -291,9 +291,11 @@ export function openGateItems(state) {
 // Proofs (passing preexisting runs) made against full run F: a proof holds
 // only for the full run it was made against.
 const proofsAgainst = (state, F) => (state.testRuns || []).filter((r) => r.kind === 'preexisting' && r.proven === true && r.sinceFull === F.id);
-export function provenAgainst(state, F) {
-  return new Set(proofsAgainst(state, F).map((r) => r.test));
-}
+
+// Failure `t` of `run` is proven when a proof against F names the same test
+// from the same file (no file on either side = an id-only runner; a file on
+// one side only is identity not established, so unproven).
+const provenFailure = (proofs, run, t) => proofs.some((p) => p.test === t && (p.file ?? '') === (run.failureFiles?.[t] ?? ''));
 
 // A red run whose report parsed, passed something, names each failure once,
 // and fails only on tests that failed in F and were proven pre-existing
@@ -305,8 +307,7 @@ export function onlyProvenFailures(state, run, F) {
   if (!(run.passedCount > 0) || new Set(run.failures).size !== run.failures.length) return false;
   const inF = new Set(F.failures || []);
   const proofs = proofsAgainst(state, F);
-  return run.failures.every((t) => inF.has(t)
-    && proofs.some((p) => p.test === t && (p.file ?? '') === (run.failureFiles?.[t] ?? '')));
+  return run.failures.every((t) => inF.has(t) && provenFailure(proofs, run, t));
 }
 
 // Spec §3.3: with a `tests` config, integration needs one full run F (the
@@ -337,8 +338,8 @@ export function testBlockers(state, ctx = {}) {
     }
     // A proof holds for the full run it was made against: a later red full
     // run may report the same id from another test, so it needs a re-proof.
-    const proven = provenAgainst(state, F);
-    const unproven = F.failures.filter((t) => !proven.has(t));
+    const proofs = proofsAgainst(state, F);
+    const unproven = F.failures.filter((t) => !provenFailure(proofs, F, t));
     if (unproven.length) {
       return [`full test run #${F.id} has ${unproven.length} failing test(s) not proven pre-existing: ${unproven.join(', ')}`];
     }

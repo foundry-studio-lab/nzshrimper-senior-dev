@@ -144,7 +144,8 @@ export function runTest({ repoRoot, cwd, state, cfg, kind, files, test }) {
   // pre-existing failures: nothing to run. Checked before any escalation to
   // full (no `related`, a deletion), which would otherwise rerun forever.
   const F0 = last('full');
-  let nothing = kind === 'affected' && !!F0 && F0.tree === tree && (F0.exit === 0 || onlyProvenFailures(state, F0, F0));
+  // Explicitly named files always run (they add to the affected set).
+  let nothing = kind === 'affected' && !(files && files.length) && !!F0 && F0.tree === tree && (F0.exit === 0 || onlyProvenFailures(state, F0, F0));
   if (kind === 'affected' && !nothing) {
     if (!t.related) cmdKind = 'full';
     else {

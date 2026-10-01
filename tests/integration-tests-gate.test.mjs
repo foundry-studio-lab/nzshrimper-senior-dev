@@ -72,6 +72,16 @@ test('all failures proven + ship armed: no test blocker', () => {
   assert.deepEqual(integrationBlockers(s, ctx), []);
 });
 
+test('v0.4.1 c3: the full-run waiver matches proofs by file too (another file, or a file-less proof, stays unproven)', () => {
+  const F = full(1, { exit: 1, failures: ['a > x'], passedCount: 3, failureFiles: { 'a > x': 'test/b.test.mjs' } });
+  for (const proof of [{ ...pre(2, 'a > x'), file: 'test/a.test.mjs' }, pre(2, 'a > x')]) {
+    const b = integrationBlockers(clearState({ testRuns: [F, proof], ship: SHIP }), ctx);
+    assert.deepEqual(b, ['full test run #1 has 1 failing test(s) not proven pre-existing: a > x'], JSON.stringify(proof));
+  }
+  const same = integrationBlockers(clearState({ testRuns: [F, { ...pre(2, 'a > x'), file: 'test/b.test.mjs' }], ship: SHIP }), ctx);
+  assert.deepEqual(same, []);
+});
+
 test('v0.4.1: an affected run red only on proven pre-existing failures covers the tree when ship is armed', () => {
   // The full run is at an older tree; the later affected run re-runs the
   // still-failing pre-existing test, so it can never be exit 0.

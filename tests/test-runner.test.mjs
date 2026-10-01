@@ -340,6 +340,17 @@ test('v0.4.1 c2: a --one run red only on a proven id is proven-only', () => {
   assert.equal(readState(t.dir).testRuns.at(-1).provenOnly, true);
 });
 
+test('v0.4.1 c3: explicit --affected files still run at the full run tree', () => {
+  const t = setup();
+  t.setReport(xml([pass('s', 'ok')])); t.setExit(0);
+  cli(t.dir, ['test', '--full']); // green F at the current tree
+  cli(t.dir, ['test', '--affected', 'x.js']);
+  const run = readState(t.dir).testRuns.at(-1);
+  assert.equal(run.kind, 'affected');
+  assert.deepEqual(run.files, ['x.js']);
+  assert.ok(t.markers().at(-1).endsWith('REL x.js'), t.markers().at(-1));
+});
+
 test('v0.4.1 c2: an unchanged tree after a full run with an unproven failure still runs full', () => {
   const t = setup();
   t.setReport(xml([pass('s', 'ok'), failing('s', 'legacy')])); t.setExit(1);
