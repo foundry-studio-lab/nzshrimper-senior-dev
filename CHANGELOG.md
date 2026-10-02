@@ -31,7 +31,9 @@ Hardening pass on the 0.4 test runner, plus a runner for reviews.
   reviewer wrote to the repo. It runs async in a detached process group,
   sends SIGTERM on timeout and SIGKILL after a 2 s grace, and handles
   signals. The write check is status + HEAD + diff hash + would-commit tree
-  and fails closed on a snapshot or root error. Auth failures are read from
+  and fails closed (exit 3) on a snapshot error or any root-discovery error
+  except git's own "not a git repository", which runs the review with no
+  write check. Auth failures are read from
   stderr. `SENIOR_DEV_REVIEW_RUN` stands down the stop gate and the
   session-start banner while a runner review is live (honoured by those two
   only).
