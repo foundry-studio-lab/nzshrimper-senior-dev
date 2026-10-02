@@ -3,13 +3,15 @@
 // Claude via `claude -p`) and prints the JSON verdict. Exit codes: 0 verdict
 // printed, 2 usage error, 3 degrade (prints the `state-cli degrade` line to
 // record), 4 the reviewer wrote to the repo. Never writes senior-dev state.
-import { spawnSync, execFileSync } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
+import { wouldCommitTree } from './lib/test-runner.mjs';
+import { findRepoRoot, statePath } from './lib/state.mjs';
 
 const MIN = 60_000;
 const TIER_MIN = { low: 15, medium: 15, haiku: 15, sonnet: 15, high: 25, opus: 25, fable: 25, xhigh: 40 };
@@ -63,20 +65,56 @@ const git = (cwd, args) => {
   try { return execFileSync('git', args, { cwd, encoding: 'buffer', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 1 << 30 }); }
   catch { return Buffer.alloc(0); } // no HEAD yet: '' on both sides compares equal
 };
+const sha = (b) => createHash('sha256').update(b).digest('hex');
+const tryOr = (f, d) => { try { return f(); } catch { return d; } };
 // The diff hash catches an edit to a file that was already dirty, which
-// leaves `status --porcelain` unchanged.
+// leaves `status --porcelain` unchanged; the would-commit tree catches an
+// edit to an already-untracked file. The senior-dev state file (in the main
+// checkout, git-ignored) is hashed too; other ignored paths stay blind.
 const snapshot = (root) => ({
   status: git(root, ['status', '--porcelain']).toString(),
   head: git(root, ['rev-parse', 'HEAD']).toString().trim(),
-  diff: createHash('sha256').update(git(root, ['diff', 'HEAD', '--binary'])).digest('hex'),
+  diff: sha(git(root, ['diff', 'HEAD', '--binary'])),
+  tree: tryOr(() => wouldCommitTree(root), ''),
+  state: tryOr(() => sha(readFileSync(statePath(findRepoRoot(root)))), ''),
 });
+
+// One reviewer attempt in its own process group, so a timeout kills the
+// reviewer's children too. Resolves after the group's stdio closes.
+// ponytail: output past 64 MB is dropped, not an error; the verdict must
+// come before that.
+function attempt(cmd, args, { cwd, env, ms }) {
+  return new Promise((done) => {
+    const out = [], err = [];
+    let size = 0, timedOut = false, error = null;
+    const child = spawn(cmd, args, { cwd, env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    const keep = (buf) => (d) => { if ((size += d.length) <= 64 << 20) buf.push(d); };
+    child.stdout.on('data', keep(out));
+    child.stderr.on('data', keep(err));
+    const group = (sig) => { try { process.kill(-child.pid, sig); } catch { /* group gone */ } };
+    let grace;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      group('SIGTERM');
+      grace = setTimeout(() => group('SIGKILL'), 2000);
+    }, ms);
+    const finish = (status) => {
+      clearTimeout(timer); clearTimeout(grace);
+      if (timedOut) group('SIGKILL'); // anything that shrugged off SIGTERM
+      done({ status, error: timedOut ? { code: 'ETIMEDOUT' } : error,
+        stdout: Buffer.concat(out).toString('utf8'), stderr: Buffer.concat(err).toString('utf8') });
+    };
+    child.on('error', (e) => { error = e; if (child.pid === undefined) finish(null); });
+    child.on('close', (status) => { if (child.pid !== undefined) finish(status); });
+  });
+}
 
 // Exits unwind as a thrown value so stdout drains before the process ends
 // (process.exit can truncate a piped stdout on macOS).
 class Exit { constructor(code, out, err = '') { Object.assign(this, { code, out, err }); } }
 const usage = (msg) => { throw new Exit(2, '', `review-run: ${msg}\nusage: review-run.mjs --reviewer codex|claude --phase <p> --range <a..b> [--spec <path>|none] [--effort <e>] [--model <m>] [--timeout <min>]\n`); };
 
-function main(argv, env) {
+async function main(argv, env) {
   let o;
   try {
     o = parseArgs({ args: argv, strict: true, options: Object.fromEntries(
@@ -92,6 +130,15 @@ function main(argv, env) {
   const degrade = (reason) => {
     throw new Exit(3, `state-cli degrade --wanted "${o.reviewer} review (phase ${o.phase})" --used none --reason "${reason}"\n`);
   };
+  // Anything unexpected past the usage checks (an unreadable prompt template,
+  // say) is a degrade, not a stack trace.
+  try { await review(o, env, degrade); } catch (e) {
+    if (e instanceof Exit) throw e;
+    degrade(`unexpected error: ${String(e?.message ?? e).replaceAll('"', "'").replace(/\s+/g, ' ')}`);
+  }
+}
+
+async function review(o, env, degrade) {
   const label = o.reviewer === 'claude' ? 'claude CLI' : 'codex';
   const prompt = buildPrompt(readFileSync(PROMPT_FILE, 'utf8'), { range: o.range, phase: o.phase, spec: o.spec ?? 'none' });
   let cmd, args;
@@ -108,20 +155,22 @@ function main(argv, env) {
 
   const mins = ms / MIN;
   const failures = [];
-  for (let attempt = 0; attempt < 2; attempt++) {
+  for (let i = 0; i < 2; i++) {
     const before = snapshot(root);
-    const r = spawnSync(cmd, args, { cwd: root, encoding: 'utf8', timeout: ms, killSignal: 'SIGTERM', maxBuffer: 64 << 20, env });
+    const r = await attempt(cmd, args, { cwd: root, env, ms });
     const after = snapshot(root);
     const changed = Object.keys(before).filter((k) => before[k] !== after[k]);
     if (changed.length) {
       const detail = changed.includes('status') ? `status before:\n${before.status}status after:\n${after.status}` : '';
       throw new Exit(4, `WRITE DETECTED: ${o.reviewer} changed the repo during a read-only review\nchanged: ${changed.join(', ')}\n${detail}`);
     }
-    if (r.error && r.error.code !== 'ETIMEDOUT') degrade(`${label} not found`);
+    if (r.error && r.error.code === 'ENOENT') degrade(`${label} not found`);
+    if (r.error && r.error.code !== 'ETIMEDOUT') degrade(`${label} failed to start (${r.error.code})`);
     if (r.error) { failures.push('timed out'); continue; }
+    // A login failure wins over any verdict-shaped line printed before it.
+    if (r.status !== 0 && AUTH.test(`${r.stdout}\n${r.stderr}`)) degrade(`${label} not logged in`);
     const verdict = parseVerdict(r.stdout);
     if (verdict) throw new Exit(0, JSON.stringify(verdict) + '\n');
-    if (r.status !== 0 && AUTH.test(`${r.stdout}\n${r.stderr}`)) degrade(`${label} not logged in`);
     failures.push('no JSON verdict');
   }
   const [a, b] = failures;
@@ -131,8 +180,8 @@ function main(argv, env) {
 
 const self = (() => { try { return realpathSync(fileURLToPath(import.meta.url)) === realpathSync(process.argv[1]); } catch { return false; } })();
 if (self) {
-  try { main(process.argv.slice(2), process.env); } catch (e) {
+  main(process.argv.slice(2), process.env).catch((e) => {
     if (!(e instanceof Exit)) throw e;
     process.stdout.write(e.out); process.stderr.write(e.err); process.exitCode = e.code;
-  }
+  });
 }

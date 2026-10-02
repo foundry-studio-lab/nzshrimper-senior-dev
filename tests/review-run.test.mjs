@@ -14,8 +14,9 @@ const g = (cwd, ...a) => execFileSync('git', a, { cwd, encoding: 'utf8' }).trim(
 // One fake body serves both lanes: it logs its argv, bumps an attempt counter
 // and acts on FAKE_MODE (comma list, one mode per attempt; the last repeats).
 // It lives outside the repo so its own bookkeeping never trips the write check.
-const FAKE = `import { appendFileSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
+const FAKE = `import { appendFileSync, readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { spawn } from 'node:child_process';
 const d = process.env.FAKE_DIR;
 appendFileSync(join(d, 'calls.jsonl'), JSON.stringify(process.argv.slice(2)) + '\\n');
 const n = (existsSync(join(d, 'n')) ? Number(readFileSync(join(d, 'n'), 'utf8')) : 0) + 1;
@@ -30,6 +31,13 @@ if (mode === 'hang') { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0,
 if (mode === 'write') { writeFileSync('x.txt', 'oops'); process.stdout.write(V + '\\n'); }
 if (mode === 'dirty') { appendFileSync('a.js', 'more'); process.stdout.write(V + '\\n'); }
 if (mode === 'auth') { process.stderr.write('Invalid API key · Please run /login\\n'); process.exit(1); }
+if (mode === 'verdict-auth') { process.stdout.write(V + '\\n'); process.stderr.write('Please run /login\\n'); process.exit(1); }
+if (mode === 'untracked') { appendFileSync('u.txt', 'more'); process.stdout.write(V + '\\n'); }
+if (mode === 'state') { mkdirSync('.senior-dev', { recursive: true }); writeFileSync('.senior-dev/state.json', '{}'); process.stdout.write(V + '\\n'); }
+if (mode === 'grandchild') {
+  spawn(process.execPath, ['-e', 'setTimeout(() => require("fs").writeFileSync(process.argv[1], "alive"), 2500)', join(d, 'grandchild')], { stdio: 'ignore' });
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5000);
+}
 `;
 
 function setup({ dirty = false } = {}) {
@@ -121,6 +129,67 @@ test('a write to an already-dirty file is caught by the diff hash', () => {
   assert.equal(r.status, 4, r.out);
   assert.match(r.stdout, /diff/);
   assert.ok(!/\bstatus\b/.test(r.stdout.split('\n')[1] || ''), 'status itself did not change');
+});
+
+// Final review F3: an untracked edit leaves status and `diff HEAD` unchanged;
+// the senior-dev state file is git-ignored.
+test('an edit to a pre-existing untracked file is caught: exit 4', () => {
+  const s = setup();
+  writeFileSync(join(s.repo, 'u.txt'), 'u');
+  const r = run(s, CLAUDE, { mode: 'untracked' });
+  assert.equal(r.status, 4, r.out);
+  assert.match(r.stdout, /changed: .*tree/);
+});
+
+test('a write to the git-ignored senior-dev state file is caught: exit 4', () => {
+  const s = setup();
+  writeFileSync(join(s.repo, '.git', 'info', 'exclude'), '.senior-dev/\n');
+  const r = run(s, CLAUDE, { mode: 'state' });
+  assert.equal(r.status, 4, r.out);
+  assert.match(r.stdout, /changed: .*state/);
+});
+
+// Final review F4: the timeout kills the reviewer's whole process group.
+test('timeout kills the reviewer process group, grandchildren included', () => {
+  const s = setup();
+  const r = run(s, CLAUDE, { mode: 'grandchild,prose' });
+  assert.equal(r.status, 3, r.out);
+  assert.match(r.stdout, /--reason "timed out \([^)]*\), then no JSON verdict"/);
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2500);
+  assert.equal(existsSync(join(s.fake, 'grandchild')), false, 'the grandchild outlived the timeout');
+});
+
+// Final review F5: auth failure wins over a verdict-shaped line.
+test('a verdict line then a login failure with non-zero exit: exit 3 not logged in, one call', () => {
+  const s = setup();
+  const r = run(s, CLAUDE, { mode: 'verdict-auth' });
+  assert.equal(r.status, 3, r.out);
+  assert.match(r.stdout, /--reason "claude CLI not logged in"/);
+  assert.equal(calls(s).length, 1);
+});
+
+// Final review F8: only ENOENT is "not found".
+test('a reviewer binary that cannot be executed: failed to start (EACCES)', () => {
+  const s = setup();
+  const bin = join(s.fake, 'noexec');
+  writeFileSync(bin, '#!/bin/sh\n');
+  const r = run(s, CLAUDE, { env: { SENIOR_DEV_CLAUDE_BIN: bin } });
+  assert.equal(r.status, 3, r.out);
+  assert.match(r.stdout, /--reason "claude CLI failed to start \(EACCES\)"/);
+});
+
+// Final review F7: a copy of the scripts with no review-prompt.md beside them.
+test('an unexpected error (prompt template unreadable) is a degrade line, exit 3', () => {
+  const s = setup();
+  const root = mkdtempSync(join(tmpdir(), 'sd-rr-copy-'));
+  mkdirSync(join(root, 'scripts', 'lib'), { recursive: true });
+  for (const f of ['review-run.mjs', 'lib/test-runner.mjs', 'lib/state.mjs']) {
+    writeFileSync(join(root, 'scripts', f), readFileSync(new URL(`../scripts/${f}`, import.meta.url)));
+  }
+  const r = spawnSync('node', [join(root, 'scripts', 'review-run.mjs'), ...CLAUDE], { cwd: s.repo, encoding: 'utf8' });
+  assert.equal(r.status, 3, r.stdout + r.stderr);
+  assert.match(r.stdout, /--used none --reason "unexpected error: ENOENT[^"]*review-prompt\.md[^"]*"/);
+  assert.equal(r.stderr, '');
 });
 
 test('missing claude binary: exit 3 claude CLI not found', () => {
