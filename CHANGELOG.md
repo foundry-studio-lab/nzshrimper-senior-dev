@@ -11,8 +11,11 @@ Hardening pass on the 0.4 test runner, plus a runner for reviews.
 - `openItems` is shared by every gate caller and fails closed: if the test
   rules cannot be evaluated the item stays open with
   `tests: could not evaluate the test rules (...)` instead of reading as met.
-- `skills-config set-tests` takes a lock, logs the change and shows the
-  tests config in the status line.
+- `skills-config set-tests` is refused once the active session has test
+  runs, unless `--by-operator` (the operator's yes); such a change is logged
+  to `state.testsConfigChanges` and `status` prints
+  `tests config changed mid-session (N)`.
+- The stop gate and the session-start banner now list open test items too.
 - `test --affected` compares the full run's tree with the current
   would-commit tree (tree to tree). Untracked files no longer trigger a
   re-run or read as deleted; a full run missing `tree` or `head` falls back
