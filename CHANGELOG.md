@@ -8,18 +8,23 @@ Hardening pass on the 0.4 test runner, plus a runner for reviews.
   substitutions inside double quotes and tokens split by parentheses are now
   seen as the commands they run, so a guarded push hidden in one is no
   longer missed.
-- `openItems` is shared by every gate caller and fails closed: if the test
-  rules cannot be evaluated the item stays open with
+- `openItems` is shared by status, finish, the stop gate and the
+  session-start banner, and fails closed: if evaluating the test rules of a
+  valid tests config throws, the item stays open with
   `tests: could not evaluate the test rules (...)` instead of reading as met.
+  A corrupt or unreadable `skills.json` still reads as "no tests config"
+  (`readSkillsConfig` returns null).
 - `skills-config set-tests` is refused once the active session has test
   runs, unless `--by-operator` (the operator's yes); such a change is logged
   to `state.testsConfigChanges` and `status` prints
   `tests config changed mid-session (N)`.
 - The stop gate and the session-start banner now list open test items too.
 - `test --affected` compares the full run's tree with the current
-  would-commit tree (tree to tree). Untracked files no longer trigger a
-  re-run or read as deleted; a full run missing `tree` or `head` falls back
-  to a full run.
+  would-commit tree (tree to tree). An untracked file already present at
+  the full run (and still present) no longer reads as deleted or forces a
+  full run; a file created after the full run is affected, as it should be.
+  The base is the full run's `tree`, else its `head`, else a full run (only
+  when both are unusable).
 - New `scripts/review-run.mjs` runs one read-only review (Codex, or headless
   `claude -p` for the Codex app) and prints the JSON verdict. Exit codes:
   0 verdict, 2 usage, 3 degrade (prints the `state-cli degrade` line), 4 the

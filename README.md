@@ -75,9 +75,14 @@ removes it, and confirms a clean tree before archiving the session:
   write-detection guard. `scripts/review-run.mjs` runs these passes (and a
   headless Claude pass for the Codex app, `--skill claude-headless`) as one
   detached process with a timeout, and exits 0 (verdict), 2 (usage), 3 (degrade:
-  timeout, auth or reviewer failure) or 4 (the reviewer wrote to the repo). It needs the `claude` CLI installed and logged in for the
-  Claude lane. Plan mode plus a tool allowlist is the guarantee that a review
-  cannot write; the status/HEAD/diff/tree write check is only the backstop.
+  timeout, auth or reviewer failure) or 4 (the reviewer wrote to the repo).
+  It needs the `claude` CLI installed and logged in for the Claude lane.
+  Plan mode plus a tool allowlist (Claude lane) and Codex's read-only default
+  (no `--write`) are the primary protection; the allowlisted `git diff` /
+  `git show` / `git log` still accept write-capable options such as
+  `--output=<path>`, so this is not a strict guarantee. The
+  status/HEAD/diff/tree write check detects writes to tracked or untracked,
+  non-ignored paths after the fact (exit 4) but cannot see ignored paths.
   Use `--timeout` for long reviews.
 - **Docs gate** — spec, plan, handover, affected docs.
 - **Hygiene sweep** — evidence-based zero-leftovers close.
