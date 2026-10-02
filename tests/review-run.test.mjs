@@ -135,7 +135,8 @@ test('a write to an already-dirty file is caught by the diff hash', () => {
 });
 
 // Final review F3: an untracked edit leaves status and `diff HEAD` unchanged;
-// the senior-dev state file is git-ignored.
+// the would-commit tree hash covers it. The senior-dev state file is
+// deliberately not compared (see the next test).
 test('an edit to a pre-existing untracked file is caught: exit 4', () => {
   const s = setup();
   writeFileSync(join(s.repo, 'u.txt'), 'u');
