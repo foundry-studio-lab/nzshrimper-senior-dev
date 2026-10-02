@@ -149,15 +149,15 @@ export function runTest({ repoRoot, cwd, state, cfg, kind, files, test }) {
   if (kind === 'affected' && !nothing) {
     if (!t.related) cmdKind = 'full';
     else {
-      // A full run taken before the first commit has no head: diff against
-      // the tree it tested (modified and deleted since), or run the full
-      // suite if gc has pruned that tree. With no full run and no commit,
-      // use the empty tree (asked of git: its id depends on the object
+      // Diff against the tree the latest full run tested (what changed since
+      // it, committed or not), falling back to its head if gc pruned that
+      // tree, or the full suite if neither is usable. With no full run and no
+      // commit, use the empty tree (asked of git: its id depends on the object
       // format), so every file counts as affected.
       const emptyTree = () => gitOut(cwd, ['hash-object', '-t', 'tree', '/dev/null']);
       const hasObject = (id) => { try { gitOut(cwd, ['cat-file', '-e', id]); return true; } catch { return false; } };
       const F = last('full');
-      const base = F ? (F.head || (F.tree && hasObject(F.tree) ? F.tree : null))
+      const base = F ? ((F.tree && hasObject(F.tree)) ? F.tree : (F.head || null))
         : (state.baseHead || (headSha(cwd) ? 'HEAD' : emptyTree()));
       if (!base) { cmdKind = 'full'; deleted = true; } else {
         const changed = changedFiles(cwd, base);
