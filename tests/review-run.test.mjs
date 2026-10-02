@@ -37,6 +37,11 @@ if (mode === 'untracked') { appendFileSync('u.txt', 'more'); process.stdout.writ
 if (mode === 'state') { mkdirSync('.senior-dev', { recursive: true }); writeFileSync('.senior-dev/state.json', '{}'); process.stdout.write(V + '\\n'); }
 if (mode === 'env') { writeFileSync(join(d, 'env'), String(process.env.SENIOR_DEV_REVIEW_RUN)); process.stdout.write(V + '\\n'); }
 if (mode === 'verdict-login') { process.stdout.write('{"verdict":"NEEDS_REVISION","concerns":[{"id":"1","text":"login bug: authentication skipped"}]}\\n'); process.exit(1); }
+if (mode === 'trap') {
+  const gc = "process.on('SIGTERM', () => { const w = (f) => require('fs').writeFileSync(require('path').join(process.argv[1], f), 'x'); setTimeout(() => w('m1'), 1000); setTimeout(() => w('m2'), 3000); }); setInterval(() => {}, 1000);";
+  spawn(process.execPath, ['-e', gc, d], { stdio: 'ignore' });
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5000);
+}
 if (mode === 'grandchild') {
   spawn(process.execPath, ['-e', 'setTimeout(() => require("fs").writeFileSync(process.argv[1], "alive"), 2500)', join(d, 'grandchild')], { stdio: 'ignore' });
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5000);
@@ -62,7 +67,8 @@ function run(s, args, { mode = 'json', env = {} } = {}) {
   const r = spawnSync('node', [RUNNER, ...args], {
     cwd: s.repo, encoding: 'utf8',
     env: { ...process.env, FAKE_DIR: s.fake, FAKE_MODE: mode, SENIOR_DEV_CLAUDE_BIN: s.claude,
-      SENIOR_DEV_CODEX_COMPANION: s.companion, SENIOR_DEV_REVIEW_TIMEOUT_MS: '1500', ...env },
+      SENIOR_DEV_CODEX_COMPANION: s.companion, SENIOR_DEV_REVIEW_TIMEOUT_MS: '1500',
+      SENIOR_DEV_REVIEW_GRACE_MS: '200', ...env }, // short grace keeps timeout tests fast; the grace test uses the real 2 s
   });
   return { status: r.status, stdout: r.stdout, out: r.stdout + r.stderr };
 }
@@ -103,7 +109,7 @@ test('prose twice: exit 3 with the exact degrade line', () => {
 test('hang twice: Node-enforced timeout, exit 3 timed out twice', () => {
   const s = setup();
   const t0 = Date.now();
-  const r = run(s, CLAUDE, { mode: 'hang' });
+  const r = run(s, CLAUDE, { mode: 'hang', env: { SENIOR_DEV_REVIEW_TIMEOUT_MS: '1000' } });
   assert.equal(r.status, 3, r.out);
   assert.match(r.out, /timed out twice/);
   assert.equal(calls(s).length, 2);
@@ -112,7 +118,7 @@ test('hang twice: Node-enforced timeout, exit 3 timed out twice', () => {
 
 test('mixed failures name both: timeout then prose', () => {
   const s = setup();
-  const r = run(s, CLAUDE, { mode: 'hang,prose' });
+  const r = run(s, CLAUDE, { mode: 'hang,prose', env: { SENIOR_DEV_REVIEW_TIMEOUT_MS: '1000' } });
   assert.equal(r.status, 3, r.out);
   assert.match(r.stdout, /--reason "timed out \([^)]*\), then no JSON verdict"/);
 });
@@ -238,6 +244,17 @@ test('timeout kills the reviewer process group, grandchildren included', () => {
   // The grandchild would write 2.5 s after it started; the runner returns after >= 1.5 s (timeout) + attempt 2.
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1500);
   assert.equal(existsSync(join(s.fake, 'grandchild')), false, 'the grandchild outlived the timeout');
+});
+
+// Wave 5: SIGKILL waits the full 2 s grace even when the leader dies on SIGTERM.
+test('timeout grace: descendants get 2 s after SIGTERM, then SIGKILL', async () => {
+  const s = setup();
+  const r = run(s, CLAUDE, { mode: 'trap,prose', env: { SENIOR_DEV_REVIEW_GRACE_MS: '2000', SENIOR_DEV_REVIEW_TIMEOUT_MS: '1000' } });
+  assert.equal(r.status, 3, r.out);
+  assert.match(r.stdout, /--reason "timed out \([^)]*\), then no JSON verdict"/);
+  assert.equal(existsSync(join(s.fake, 'm1')), true, 'the 1 s marker: grace honoured');
+  await sleep(1500); // m2 is due 3 s after SIGTERM, about 1 s after the runner returns
+  assert.equal(existsSync(join(s.fake, 'm2')), false, 'the 3 s marker: SIGKILL came after the grace');
 });
 
 // Final review F5: auth failure wins over a verdict-shaped line.

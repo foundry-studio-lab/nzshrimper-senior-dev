@@ -92,7 +92,9 @@ let live = null;
 // reviewer's children too. Resolves after the group's stdio closes.
 // ponytail: output past 64 MB is dropped, not an error; the verdict must
 // come before that.
+// SENIOR_DEV_REVIEW_GRACE_MS is a hidden test hook (default 2 s, spec 4.5).
 function attempt(cmd, args, { cwd, env, ms }) {
+  const grace = Number(env.SENIOR_DEV_REVIEW_GRACE_MS) || 2000;
   return new Promise((done) => {
     const out = [], err = [];
     let size = 0, timedOut = false, error = null;
@@ -103,18 +105,24 @@ function attempt(cmd, args, { cwd, env, ms }) {
     child.stdout.on('data', keep(out));
     child.stderr.on('data', keep(err));
     const group = (sig) => { try { process.kill(-child.pid, sig); } catch { /* group gone */ } };
-    let grace;
+    // On timeout: SIGTERM the group, SIGKILL it after the full 2 s grace even
+    // when the leader dies at once (descendants get their grace), and resolve
+    // only after both the SIGKILL and the leader's close, so nothing in the
+    // group can write after the after-snapshot.
+    let killed = false, closed = null;
     const timer = setTimeout(() => {
       timedOut = true;
       group('SIGTERM');
-      grace = setTimeout(() => group('SIGKILL'), 2000);
+      setTimeout(() => { group('SIGKILL'); killed = true; if (closed) closed(); }, grace);
     }, ms);
     const finish = (status) => {
-      clearTimeout(timer); clearTimeout(grace);
-      if (timedOut) group('SIGKILL'); // anything that shrugged off SIGTERM
-      live = null;
-      done({ status, error: timedOut ? { code: 'ETIMEDOUT' } : error,
-        stdout: Buffer.concat(out).toString('utf8'), stderr: Buffer.concat(err).toString('utf8') });
+      clearTimeout(timer);
+      const settle = () => {
+        live = null;
+        done({ status, error: timedOut ? { code: 'ETIMEDOUT' } : error,
+          stdout: Buffer.concat(out).toString('utf8'), stderr: Buffer.concat(err).toString('utf8') });
+      };
+      if (timedOut && !killed) closed = settle; else settle();
     };
     child.on('error', (e) => { error = e; if (child.pid === undefined) finish(null); });
     child.on('close', (status) => { if (child.pid !== undefined) finish(status); });
