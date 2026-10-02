@@ -905,14 +905,17 @@ switch (cmd) {
       if (flags['by-operator'] !== undefined && flags['by-operator'] !== true) fail('set-tests --by-operator does not take a value');
       const cfg = readSkillsConfig(repoRoot) || { source: 'superpowers', shared: false };
       const st = readState(repoRoot);
-      if (hasActiveSession(st) && st.testRuns?.length) {
-        if (flags['by-operator'] !== true) fail("set-tests refused - this session already has test runs; changing the commands now would change what those runs mean. Rerun with --by-operator (the operator's yes) to change them anyway.");
-        st.testsConfigChanges = [...(st.testsConfigChanges || []), { from: cfg.tests ?? null, to: tests, at: new Date().toISOString() }];
-        writeState(repoRoot, st);
-      }
+      const logChange = hasActiveSession(st) && st.testRuns?.length;
+      if (logChange && flags['by-operator'] !== true) fail("set-tests refused - this session already has test runs; changing the commands now would change what those runs mean. Rerun with --by-operator (the operator's yes) to change them anyway.");
+      const from = cfg.tests ?? null;
       cfg.tests = tests;
       stampVersion(cfg);
+      // Config first: a failed write must not leave a logged change that never happened.
       writeSkillsConfig(repoRoot, cfg);
+      if (logChange) {
+        st.testsConfigChanges = [...(st.testsConfigChanges || []), { from, to: tests, at: new Date().toISOString() }];
+        writeState(repoRoot, st);
+      }
       ensureExcluded(repoRoot);
       console.log(`tests config: ${JSON.stringify(tests)}`);
       const rel = tests.report ? relative(repoRoot, resolve(repoRoot, tests.report)) : '';
