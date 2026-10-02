@@ -1,9 +1,11 @@
-# Codex review prompt (read-only, JSON-first)
+# Review prompt (read-only, JSON-first, both vendors)
 
-Fill `<RANGE>` (e.g. `v0.2.1..HEAD` or `<sha>..HEAD`), `<PHASE>`, and `<SPEC>`
-(the committed spec's path, or `none`), then pass
-the whole block as the single prompt argument of
-`codex-companion.mjs task --fresh --effort <effort>`.
+Shared by the Codex lane and the headless Claude lane. `scripts/review-run.mjs`
+fills `<RANGE>` (e.g. `v0.2.1..HEAD` or `<sha>..HEAD`), `<PHASE>`, and `<SPEC>`
+(the committed spec's path, or `none`) in the block between the two `---`
+lines and passes it as the single prompt argument of
+`codex-companion.mjs task --fresh --effort <effort>` or
+`claude -p --model <tier> --permission-mode plan ...`.
 
 ---
 READ-ONLY code review for phase <PHASE>. Do NOT modify, create, or delete

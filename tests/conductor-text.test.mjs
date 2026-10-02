@@ -7,7 +7,7 @@ import { join, dirname } from 'node:path';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (p) => readFileSync(join(root, p), 'utf8');
 const skill = read('skills/conductor/SKILL.md');
-const prompt = read('skills/conductor/references/codex-review-prompt.md');
+const prompt = read('skills/conductor/references/review-prompt.md');
 
 test('conductor names the v0.4 CLI surface', () => {
   for (const s of ['state-cli test --affected', 'state-cli test --full', 'test --preexisting', 'CONTRADICTION',
