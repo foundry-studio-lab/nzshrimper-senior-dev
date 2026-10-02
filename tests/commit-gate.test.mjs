@@ -371,3 +371,14 @@ test('v0.4.2: unquoted $() and backticks are one token; inner text is classified
   assert.deepEqual(classifyCommand('git commit -m "$(cat msg)"'), { commit: true, integration: false });
   assert.deepEqual(classifyCommand('git -C $(foo && git push'), push); // unbalanced: swallowed and classified
 });
+
+test('v0.4.2 fix 1: stray/escaped parens, subshells, quoted and process substitutions classify', () => {
+  const push = { commit: false, integration: true };
+  for (const c of ['echo $(echo \\); git push)', 'echo $(echo \\( ; git push)',
+    'echo $(case x in a) echo;; esac; git push)', '(git push)',
+    'echo "$(git push)"', 'echo "`git push`"', 'cat <(git push)', 'tee >(git push)']) {
+    assert.deepEqual(classifyCommand(c), push, c);
+  }
+  assert.deepEqual(classifyCommand('git commit -m "$(cat msg)"'), { commit: true, integration: false });
+  assert.deepEqual(classifyCommand("echo '$(git push)'"), { commit: false, integration: false }); // single quotes are literal
+});
