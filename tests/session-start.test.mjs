@@ -19,6 +19,20 @@ test('outside a git repo: silent, exit 0', () => {
   assert.equal(run(dir), '');
 });
 
+// v0.4.2 wave 2 N3: inside a headless review-run reviewer: silence.
+test('SENIOR_DEV_REVIEW_RUN=1: no output even in a repo with a session', () => {
+  const repo = mkdtempSync(join(tmpdir(), 'sd-ss-rr-'));
+  execFileSync('git', ['init', '-q', repo]);
+  writeState(repo, {
+    version: 1, task: 't', type: 'feature', startedAt: 'x', chain: CHAINS['feature'], phases: {},
+    reviews: [], docsGate: { ...DOCS_GATE['feature'] }, degradations: [], bypasses: [], stopGate: { lastSnapshotHash: null },
+  });
+  const out = execFileSync('node', [SCRIPT], {
+    cwd: repo, encoding: 'utf8', input: JSON.stringify({ cwd: repo }), env: { ...process.env, SENIOR_DEV_REVIEW_RUN: '1' },
+  });
+  assert.equal(out, '');
+});
+
 test('in a repo with no session: emits bootstrap context', () => {
   const repo = mkdtempSync(join(tmpdir(), 'sd-ss-'));
   execFileSync('git', ['init', '-q', repo]);

@@ -11,7 +11,6 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { wouldCommitTree } from './lib/test-runner.mjs';
-import { findRepoRoot, statePath } from './lib/state.mjs';
 
 const MIN = 60_000;
 const TIER_MIN = { low: 15, medium: 15, haiku: 15, sonnet: 15, high: 25, opus: 25, fable: 25, xhigh: 40 };
@@ -69,15 +68,19 @@ const sha = (b) => createHash('sha256').update(b).digest('hex');
 const tryOr = (f, d) => { try { return f(); } catch { return d; } };
 // The diff hash catches an edit to a file that was already dirty, which
 // leaves `status --porcelain` unchanged; the would-commit tree catches an
-// edit to an already-untracked file. The senior-dev state file (in the main
-// checkout, git-ignored) is hashed too; other ignored paths stay blind.
+// edit to an already-untracked file. Ignored paths stay blind, the
+// senior-dev state file included: the conductor (`state-cli waiting`) and
+// hooks legitimately write it while a review runs.
 const snapshot = (root) => ({
   status: git(root, ['status', '--porcelain']).toString(),
   head: git(root, ['rev-parse', 'HEAD']).toString().trim(),
   diff: sha(git(root, ['diff', 'HEAD', '--binary'])),
   tree: tryOr(() => wouldCommitTree(root), ''),
-  state: tryOr(() => sha(readFileSync(statePath(findRepoRoot(root)))), ''),
 });
+
+// The live reviewer's pid, so an interrupted runner takes its group down
+// (it is detached: the terminal's signal never reaches it).
+let live = null;
 
 // One reviewer attempt in its own process group, so a timeout kills the
 // reviewer's children too. Resolves after the group's stdio closes.
@@ -87,7 +90,9 @@ function attempt(cmd, args, { cwd, env, ms }) {
   return new Promise((done) => {
     const out = [], err = [];
     let size = 0, timedOut = false, error = null;
-    const child = spawn(cmd, args, { cwd, env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    // SENIOR_DEV_REVIEW_RUN: the reviewer's own stop/session-start hooks stand down.
+    const child = spawn(cmd, args, { cwd, env: { ...env, SENIOR_DEV_REVIEW_RUN: '1' }, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    live = child.pid ?? null;
     const keep = (buf) => (d) => { if ((size += d.length) <= 64 << 20) buf.push(d); };
     child.stdout.on('data', keep(out));
     child.stderr.on('data', keep(err));
@@ -101,6 +106,7 @@ function attempt(cmd, args, { cwd, env, ms }) {
     const finish = (status) => {
       clearTimeout(timer); clearTimeout(grace);
       if (timedOut) group('SIGKILL'); // anything that shrugged off SIGTERM
+      live = null;
       done({ status, error: timedOut ? { code: 'ETIMEDOUT' } : error,
         stdout: Buffer.concat(out).toString('utf8'), stderr: Buffer.concat(err).toString('utf8') });
     };
@@ -167,8 +173,9 @@ async function review(o, env, degrade) {
     if (r.error && r.error.code === 'ENOENT') degrade(`${label} not found`);
     if (r.error && r.error.code !== 'ETIMEDOUT') degrade(`${label} failed to start (${r.error.code})`);
     if (r.error) { failures.push('timed out'); continue; }
-    // A login failure wins over any verdict-shaped line printed before it.
-    if (r.status !== 0 && AUTH.test(`${r.stdout}\n${r.stderr}`)) degrade(`${label} not logged in`);
+    // A login failure (on stderr only: a verdict may mention "login") wins
+    // over any verdict-shaped line printed before it.
+    if (r.status !== 0 && AUTH.test(r.stderr)) degrade(`${label} not logged in`);
     const verdict = parseVerdict(r.stdout);
     if (verdict) throw new Exit(0, JSON.stringify(verdict) + '\n');
     failures.push('no JSON verdict');
@@ -180,6 +187,12 @@ async function review(o, env, degrade) {
 
 const self = (() => { try { return realpathSync(fileURLToPath(import.meta.url)) === realpathSync(process.argv[1]); } catch { return false; } })();
 if (self) {
+  for (const [sig, code] of [['SIGINT', 130], ['SIGTERM', 143], ['SIGHUP', 129]]) {
+    process.on(sig, () => {
+      if (live) { try { process.kill(-live, 'SIGKILL'); } catch { /* ESRCH: already gone */ } }
+      process.exit(code);
+    });
+  }
   main(process.argv.slice(2), process.env).catch((e) => {
     if (!(e instanceof Exit)) throw e;
     process.stdout.write(e.out); process.stderr.write(e.err); process.exitCode = e.code;

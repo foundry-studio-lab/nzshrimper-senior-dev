@@ -28,6 +28,9 @@ async function readStdin() {
   return data;
 }
 
+// Inside a headless review-run reviewer: no bootstrap, no resume notice.
+if (process.env.SENIOR_DEV_REVIEW_RUN === '1') process.exit(0);
+
 try {
   let cwd = process.cwd();
   try {

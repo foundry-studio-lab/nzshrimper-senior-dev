@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, readFileSync, existsSync, mkdirSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync, spawnSync, spawn } from 'node:child_process';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { buildPrompt, parseVerdict, timeoutMs, findCompanion } from '../scripts/review-run.mjs';
 
 const RUNNER = new URL('../scripts/review-run.mjs', import.meta.url).pathname;
@@ -34,6 +35,8 @@ if (mode === 'auth') { process.stderr.write('Invalid API key · Please run /logi
 if (mode === 'verdict-auth') { process.stdout.write(V + '\\n'); process.stderr.write('Please run /login\\n'); process.exit(1); }
 if (mode === 'untracked') { appendFileSync('u.txt', 'more'); process.stdout.write(V + '\\n'); }
 if (mode === 'state') { mkdirSync('.senior-dev', { recursive: true }); writeFileSync('.senior-dev/state.json', '{}'); process.stdout.write(V + '\\n'); }
+if (mode === 'env') { writeFileSync(join(d, 'env'), String(process.env.SENIOR_DEV_REVIEW_RUN)); process.stdout.write(V + '\\n'); }
+if (mode === 'verdict-login') { process.stdout.write('{"verdict":"NEEDS_REVISION","concerns":[{"id":"1","text":"login bug: authentication skipped"}]}\\n'); process.exit(1); }
 if (mode === 'grandchild') {
   spawn(process.execPath, ['-e', 'setTimeout(() => require("fs").writeFileSync(process.argv[1], "alive"), 2500)', join(d, 'grandchild')], { stdio: 'ignore' });
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5000);
@@ -141,12 +144,51 @@ test('an edit to a pre-existing untracked file is caught: exit 4', () => {
   assert.match(r.stdout, /changed: .*tree/);
 });
 
-test('a write to the git-ignored senior-dev state file is caught: exit 4', () => {
+// Wave 2 N2 (controller ruling): the conductor's own `state-cli waiting` and
+// the headless Stop hook write state during a review; that is not a reviewer write.
+test('a write to the git-ignored senior-dev state file does NOT trip the write check', () => {
   const s = setup();
   writeFileSync(join(s.repo, '.git', 'info', 'exclude'), '.senior-dev/\n');
   const r = run(s, CLAUDE, { mode: 'state' });
-  assert.equal(r.status, 4, r.out);
-  assert.match(r.stdout, /changed: .*state/);
+  assert.equal(r.status, 0, r.out);
+  assert.equal(r.stdout.trim(), V);
+});
+
+// Wave 2 N3: hooks inside the headless reviewer stand down on this env.
+test('the reviewer child sees SENIOR_DEV_REVIEW_RUN=1 in both lanes', () => {
+  for (const lane of [CLAUDE, CODEX]) {
+    const s = setup();
+    const r = run(s, lane, { mode: 'env' });
+    assert.equal(r.status, 0, r.out);
+    assert.equal(readFileSync(join(s.fake, 'env'), 'utf8'), '1');
+  }
+});
+
+// Wave 2 N4: auth is read from stderr only; a verdict mentioning login is a verdict.
+test('non-zero exit with a verdict whose concern mentions login, stderr empty: the verdict, exit 0', () => {
+  const s = setup();
+  const r = run(s, CLAUDE, { mode: 'verdict-login' });
+  assert.equal(r.status, 0, r.out);
+  assert.equal(JSON.parse(r.stdout).verdict, 'NEEDS_REVISION');
+  assert.equal(calls(s).length, 1);
+});
+
+// Wave 2 N1: interrupting the runner takes the detached reviewer group down too.
+test('SIGTERM to the runner kills the reviewer group and exits 143', async () => {
+  const s = setup();
+  const child = spawn('node', [RUNNER, ...CLAUDE], {
+    cwd: s.repo, stdio: 'ignore',
+    env: { ...process.env, FAKE_DIR: s.fake, FAKE_MODE: 'grandchild', SENIOR_DEV_CLAUDE_BIN: s.claude, SENIOR_DEV_REVIEW_TIMEOUT_MS: '20000' },
+  });
+  const exited = new Promise((res) => child.on('exit', (code, sig) => res({ code, sig })));
+  const t0 = Date.now();
+  while (!existsSync(join(s.fake, 'calls.jsonl')) && Date.now() - t0 < 5000) await sleep(50);
+  await sleep(300); // the fake has spawned its grandchild
+  child.kill('SIGTERM');
+  const { code } = await exited;
+  assert.equal(code, 143);
+  await sleep(2500); // the grandchild would write 2.5 s after it started, >= 0.3 s before the kill
+  assert.equal(existsSync(join(s.fake, 'grandchild')), false, 'the grandchild outlived the interrupted runner');
 });
 
 // Final review F4: the timeout kills the reviewer's whole process group.
@@ -155,7 +197,8 @@ test('timeout kills the reviewer process group, grandchildren included', () => {
   const r = run(s, CLAUDE, { mode: 'grandchild,prose' });
   assert.equal(r.status, 3, r.out);
   assert.match(r.stdout, /--reason "timed out \([^)]*\), then no JSON verdict"/);
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2500);
+  // The grandchild would write 2.5 s after it started; the runner returns after >= 1.5 s (timeout) + attempt 2.
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1500);
   assert.equal(existsSync(join(s.fake, 'grandchild')), false, 'the grandchild outlived the timeout');
 });
 

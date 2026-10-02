@@ -36,6 +36,9 @@ async function readStdin() {
   return data;
 }
 
+// Inside a headless review-run reviewer: never block or write state.
+if (process.env.SENIOR_DEV_REVIEW_RUN === '1') process.exit(0);
+
 try {
   const data = JSON.parse(await readStdin());
   if (data.stop_hook_active) process.exit(0);

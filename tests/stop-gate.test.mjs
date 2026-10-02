@@ -1,9 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { writeState, readState, CHAINS, DOCS_GATE, openItems } from '../scripts/lib/state.mjs';
 
 const SCRIPT = new URL('../scripts/stop-gate.mjs', import.meta.url).pathname;
@@ -66,6 +66,21 @@ test('open items + completion claim: block with checklist', () => {
   const r = gate(repo);
   assert.equal(r.blocked, true);
   assert.ok(r.msg.includes('phase:implement'));
+});
+
+// v0.4.2 wave 2 N3: inside a headless review-run reviewer the gate stands down.
+test('SENIOR_DEV_REVIEW_RUN=1: allow, state untouched, even with open items + a claim', () => {
+  const repo = makeRepo();
+  writeState(repo, openState());
+  const p = join(repo, '.senior-dev', 'state.json');
+  const before = readFileSync(p, 'utf8');
+  const r = spawnSync('node', [SCRIPT], {
+    encoding: 'utf8', env: { ...process.env, SENIOR_DEV_REVIEW_RUN: '1' },
+    input: JSON.stringify({ stop_hook_active: false, transcript_path: transcript(repo, 'All done, the feature is complete.'), cwd: repo }),
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout + r.stderr, '');
+  assert.equal(readFileSync(p, 'utf8'), before);
 });
 
 test('open items but no completion claim and not finishing: allow', () => {

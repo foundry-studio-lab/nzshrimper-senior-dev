@@ -86,6 +86,20 @@ test('integration blocked with blockers, allowed when clear', () => {
   assert.equal(gate(repo, 'git push origin main').blocked, false);
 });
 
+// v0.4.2 wave 2 N3: the review-run env quiets only stop-gate/session-start.
+test('SENIOR_DEV_REVIEW_RUN=1 does not open the commit gate: gated push still blocked', () => {
+  const repo = makeRepo();
+  writeState(repo, featureState());
+  let status = 0;
+  try {
+    execFileSync('node', [SCRIPT], {
+      encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, SENIOR_DEV_REVIEW_RUN: '1' },
+      input: JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'git push origin main' }, cwd: repo }),
+    });
+  } catch (e) { status = e.status; }
+  assert.equal(status, 2);
+});
+
 test('armed bypass allows one gated action and is consumed', () => {
   const repo = makeRepo();
   writeState(repo, featureState({ bypassArmed: { reason: 'hotfix', at: 'x' } }));
