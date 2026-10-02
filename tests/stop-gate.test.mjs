@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -125,4 +125,38 @@ test('corrupt stdin: fail open', () => {
   } catch {
     assert.fail('should not exit non-zero on corrupt stdin');
   }
+});
+
+// v0.4.2 §3.2: the stop gate lists test items too. All non-test items cleared.
+function clearedState() {
+  return openState({
+    phases: Object.fromEntries(CHAINS['quick-fix'].map((p) => [p, { status: 'done' }])),
+    docsGate: Object.fromEntries(Object.keys(DOCS_GATE['quick-fix']).map((k) => [k, true])),
+  });
+}
+function writeCfg(repo, text) {
+  mkdirSync(join(repo, '.senior-dev'), { recursive: true });
+  writeFileSync(join(repo, '.senior-dev', 'skills.json'), text);
+}
+
+test('tests configured, no full run recorded: stop gate blocks on the test item', () => {
+  const repo = makeRepo();
+  writeState(repo, clearedState());
+  writeCfg(repo, JSON.stringify({ version: 4, source: 'superpowers', shared: false, tests: { full: 'node --test' } }));
+  const r = gate(repo);
+  assert.equal(r.blocked, true);
+  assert.ok(r.msg.includes('tests: no full test run recorded'));
+});
+
+test('no tests config, everything else cleared: stop gate allows', () => {
+  const repo = makeRepo();
+  writeState(repo, clearedState());
+  assert.equal(gate(repo).blocked, false);
+});
+
+test('invalid skills.json with an open phase: stop gate still blocks', () => {
+  const repo = makeRepo();
+  writeState(repo, openState());
+  writeCfg(repo, '{not json');
+  assert.equal(gate(repo).blocked, true);
 });

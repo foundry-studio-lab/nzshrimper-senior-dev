@@ -10,7 +10,7 @@ import { join, dirname, relative, resolve, isAbsolute, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   CHAINS, DOCS_GATE, LANE_RANK, isLane, findRepoRoot, readState, writeState, statePath,
-  hasActiveSession, currentPhase, latestVerdicts, latestReview, openGateItems, ensureExcluded,
+  hasActiveSession, currentPhase, latestVerdicts, latestReview, openItems, ensureExcluded,
   VALID_SOURCES, readSkillsConfig, writeSkillsConfig, resolveConfiguredSkill, normalizeLaneValue,
   stampVersion, validTests, headTree, testBlockers, resolveModel, MODEL_PHASES, CLAUDE_TIERS, CODEX_EFFORTS, TIER_RANK,
 } from './lib/state.mjs';
@@ -172,20 +172,6 @@ function requireSession(repoRoot) {
   const state = readState(repoRoot);
   if (!hasActiveSession(state)) fail('no active session (run /senior-dev:start)');
   return state;
-}
-
-// openGateItems plus the §3.3 test rules, for finish and status. Coverage of
-// the main checkout's HEAD only when it moved off baseHead (a local merge
-// that a later push would ship with the session gone). No tests config:
-// exactly openGateItems.
-function openItems(repoRoot, state) {
-  const items = openGateItems(state);
-  const tests = readSkillsConfig(repoRoot)?.tests;
-  if (!tests || tests.none) return items;
-  let head = null;
-  try { head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repoRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch { /* no commits */ }
-  const trees = head !== (state.baseHead ?? null) ? [headTree(repoRoot)] : undefined;
-  return [...items, ...testBlockers(state, { tests, trees, heads: [head] }).map((b) => `tests: ${b}`)];
 }
 
 function git(repoRoot, args) {

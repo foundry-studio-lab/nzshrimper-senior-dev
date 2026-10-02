@@ -5,7 +5,7 @@
 import { readFileSync } from 'node:fs';
 import {
   findRepoRoot, readState, writeState, hasActiveSession, currentPhase,
-  openGateItems, snapshotHash,
+  openItems, snapshotHash,
 } from './lib/state.mjs';
 
 // Deliberately loose - overfires on phrases like "one item done"; bounded by
@@ -51,7 +51,7 @@ try {
   // a fresh challenge instead of reading as "already seen".
   if (state.waiting) process.exit(0);
 
-  const items = openGateItems(state);
+  const items = openItems(repoRoot, state);
   if (!items.length) process.exit(0);
 
   const finishing = currentPhase(state) === 'finish';
