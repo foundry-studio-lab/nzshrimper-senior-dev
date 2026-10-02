@@ -155,6 +155,30 @@ test('a write to the git-ignored senior-dev state file does NOT trip the write c
   assert.equal(r.stdout.trim(), V);
 });
 
+// Wave 3: a snapshot that cannot be taken in a git repo degrades; it never
+// fails open to an empty value. An unreadable untracked file breaks `git add -A`.
+test('a write-check snapshot error in a git repo: exit 3 before any reviewer runs', { skip: process.getuid?.() === 0 }, () => {
+  const s = setup();
+  writeFileSync(join(s.repo, 'locked.txt'), 'x');
+  chmodSync(join(s.repo, 'locked.txt'), 0o000);
+  const r = run(s, CLAUDE);
+  chmodSync(join(s.repo, 'locked.txt'), 0o644);
+  assert.equal(r.status, 3, r.out);
+  assert.match(r.stdout, /--used none --reason "write check failed: [^"]+"/);
+  assert.equal(calls(s), null, 'the reviewer was never spawned');
+});
+
+test('outside a git repo the write check stays empty (no degrade on that alone)', () => {
+  const s = setup();
+  const plain = mkdtempSync(join(tmpdir(), 'sd-rr-plain-'));
+  const r = spawnSync('node', [RUNNER, ...CLAUDE], {
+    cwd: plain, encoding: 'utf8',
+    env: { ...process.env, FAKE_DIR: s.fake, FAKE_MODE: 'json', SENIOR_DEV_CLAUDE_BIN: s.claude, SENIOR_DEV_REVIEW_TIMEOUT_MS: '1500' },
+  });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(r.stdout.trim(), V);
+});
+
 // Wave 2 N3: hooks inside the headless reviewer stand down on this env.
 test('the reviewer child sees SENIOR_DEV_REVIEW_RUN=1 in both lanes', () => {
   for (const lane of [CLAUDE, CODEX]) {

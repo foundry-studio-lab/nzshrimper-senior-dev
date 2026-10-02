@@ -60,23 +60,29 @@ export function findCompanion(env, home) {
   return found.sort().at(-1) ?? null;
 }
 
-const git = (cwd, args) => {
-  try { return execFileSync('git', args, { cwd, encoding: 'buffer', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 1 << 30 }); }
-  catch { return Buffer.alloc(0); } // no HEAD yet: '' on both sides compares equal
-};
+// Throws on failure: the write check never fails open.
+const git = (cwd, args) => execFileSync('git', args, { cwd, encoding: 'buffer', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 1 << 30 });
 const sha = (b) => createHash('sha256').update(b).digest('hex');
-const tryOr = (f, d) => { try { return f(); } catch { return d; } };
 // The diff hash catches an edit to a file that was already dirty, which
 // leaves `status --porcelain` unchanged; the would-commit tree catches an
 // edit to an already-untracked file. Ignored paths stay blind, the
 // senior-dev state file included: the conductor (`state-cli waiting`) and
-// hooks legitimately write it while a review runs.
-const snapshot = (root) => ({
-  status: git(root, ['status', '--porcelain']).toString(),
-  head: git(root, ['rev-parse', 'HEAD']).toString().trim(),
-  diff: sha(git(root, ['diff', 'HEAD', '--binary'])),
-  tree: tryOr(() => wouldCommitTree(root), ''),
-});
+// hooks legitimately write it while a review runs. Outside a git repo
+// (root null) there is nothing to compare; inside one, any error throws.
+function snapshot(root) {
+  if (!root) return {};
+  let head = '';
+  try { head = git(root, ['rev-parse', '--verify', '-q', 'HEAD^{commit}']).toString().trim(); } catch (e) {
+    if (e.status !== 1 || e.stdout?.length) throw e; // exit 1, silent: no commit yet
+  }
+  const base = head || git(root, ['hash-object', '-t', 'tree', '/dev/null']).toString().trim();
+  return {
+    status: git(root, ['status', '--porcelain']).toString(),
+    head,
+    diff: sha(git(root, ['diff', base, '--binary'])),
+    tree: wouldCommitTree(root),
+  };
+}
 
 // The live reviewer's pid, so an interrupted runner takes its group down
 // (it is detached: the terminal's signal never reaches it).
@@ -156,15 +162,21 @@ async function review(o, env, degrade) {
     [cmd, args] = [env.SENIOR_DEV_CLAUDE_BIN || 'claude', ['-p', '--model', o.model, '--permission-mode', 'plan',
       '--allowedTools', CLAUDE_TOOLS, '--output-format', 'text', prompt]];
   }
-  const root = git(process.cwd(), ['rev-parse', '--show-toplevel']).toString().trim() || process.cwd();
+  let root = null; // not a git repository: no write check possible
+  try { root = git(process.cwd(), ['rev-parse', '--show-toplevel']).toString().trim() || null; } catch { /* stays null */ }
   const ms = timeoutMs(o, env);
+  const snap = () => {
+    try { return snapshot(root); } catch (e) {
+      degrade(`write check failed: ${String(e?.message ?? e).replaceAll('"', "'").replace(/\s+/g, ' ').trim()}`);
+    }
+  };
 
   const mins = ms / MIN;
   const failures = [];
   for (let i = 0; i < 2; i++) {
-    const before = snapshot(root);
-    const r = await attempt(cmd, args, { cwd: root, env, ms });
-    const after = snapshot(root);
+    const before = snap(); // a failure here degrades before the reviewer is spawned
+    const r = await attempt(cmd, args, { cwd: root || process.cwd(), env, ms });
+    const after = snap(); // ...and here, before any verdict is read
     const changed = Object.keys(before).filter((k) => before[k] !== after[k]);
     if (changed.length) {
       const detail = changed.includes('status') ? `status before:\n${before.status}status after:\n${after.status}` : '';
