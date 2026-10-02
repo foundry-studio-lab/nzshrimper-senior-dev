@@ -62,6 +62,7 @@ const UNRESOLVED = '\0unresolved';
 // The literal path a token stands for, or null when the shell would expand
 // it. Placeholders map back to their quoted spans; single quotes are literal.
 function literalToken(token, quoted) {
+  if (token.includes('\0s')) return null; // command substitution
   if (/[$`]/.test(token.replace(/\0\d+\0/g, ''))) return null;
   let bad = false;
   const out = token.replace(/\0(\d+)\0/g, (_, n) => {
@@ -86,7 +87,34 @@ function parseCommand(command) {
   // contents stay in `quoted` for resolving `-C`.
   const noHeredocs = stripHeredocBodies(command);
   const quoted = [];
-  const stripped = noHeredocs.replace(/"(?:[^"\\]|\\.)*"|'[^']*'/g, (m) => `\0${quoted.push(m) - 1}\0`);
+  const quotedOnly = noHeredocs.replace(/"(?:[^"\\]|\\.)*"|'[^']*'/g, (m) => `\0${quoted.push(m) - 1}\0`);
+  // Each unquoted $(...) (depth-counted, so nesting and $((...)) work) or
+  // `...` span becomes ONE placeholder token (\0s<n>\0), so its inner
+  // `&&`/spaces cannot split the outer segment (`git -C $(pwd) push`).
+  // The inner text, quotes restored, is classified recursively below. An
+  // unbalanced opener swallows to the end of the command (fail closed).
+  const subs = [];
+  let stripped = '';
+  for (let p = 0; p < quotedOnly.length;) {
+    let end;
+    if (quotedOnly.startsWith('$(', p)) {
+      let depth = 0;
+      for (end = p + 1; end < quotedOnly.length; end++) {
+        if (quotedOnly[end] === '(') depth++;
+        else if (quotedOnly[end] === ')' && --depth === 0) break;
+      }
+      subs.push(quotedOnly.slice(p + 2, end));
+    } else if (quotedOnly[p] === '`') {
+      end = quotedOnly.indexOf('`', p + 1);
+      if (end < 0) end = quotedOnly.length;
+      subs.push(quotedOnly.slice(p + 1, end));
+    } else {
+      stripped += quotedOnly[p++];
+      continue;
+    }
+    stripped += `\0s${subs.length - 1}\0`;
+    p = end + 1;
+  }
   const segments = stripped.split(/&&|\|\||;|\n|\|/);
 
   let commit = false;
@@ -133,6 +161,15 @@ function parseCommand(command) {
         add(`pr-${rest[i + 1]}`);
       }
     }
+  }
+
+  // Substitutions run too: `echo $(git push)` pushes. Each sub is strictly
+  // shorter than its command, so the recursion ends.
+  for (const sub of subs) {
+    const inner = parseCommand(sub.replace(/\0(\d+)\0/g, (_, n) => quoted[n]));
+    commit ||= inner.commit;
+    integration ||= inner.integration;
+    integrations.push(...inner.integrations);
   }
 
   return { commit, integration, integrations };

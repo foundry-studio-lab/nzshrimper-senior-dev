@@ -5,7 +5,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { writeState, readState, CHAINS, DOCS_GATE } from '../scripts/lib/state.mjs';
-import { classifyCommand } from '../scripts/commit-gate.mjs';
+import { classifyCommand, integrationTargets } from '../scripts/commit-gate.mjs';
+
+const UNRESOLVED_DIR = '\0unresolved';
 
 const SCRIPT = new URL('../scripts/commit-gate.mjs', import.meta.url).pathname;
 
@@ -354,4 +356,18 @@ test('split verdict blocks integration until that rejection is overruled; an uph
   assert.equal(gate(repo, 'git push origin main').blocked, true);   // wrong cycle
   writeState(repo, { ...base, adjudications: [{ phase: 'implement', reviewer: 'codex', cycle: 1, decision: 'overruled' }] });
   assert.equal(gate(repo, 'git push origin main').blocked, false);
+});
+
+test('v0.4.2: unquoted $() and backticks are one token; inner text is classified', () => {
+  const push = { commit: false, integration: true };
+  for (const c of ['git -C $(git rev-parse --show-toplevel) push', 'git -C $(pwd) push origin main',
+    'echo $(git push)', 'echo `git push`', 'echo $(echo $(git push))']) {
+    assert.deepEqual(classifyCommand(c), push, c);
+  }
+  assert.deepEqual(integrationTargets('git -C $(git rev-parse --show-toplevel) push'), [{ kind: 'push', dir: UNRESOLVED_DIR }]);
+  assert.deepEqual(integrationTargets('git -C $(pwd) push origin main'), [{ kind: 'push', dir: UNRESOLVED_DIR }]);
+  assert.deepEqual(integrationTargets('gh --repo $(echo o/r) pr create'), [{ kind: 'pr-create', dir: null }]);
+  assert.deepEqual(classifyCommand('git commit -m $(cat msg) && git push'), { commit: true, integration: true });
+  assert.deepEqual(classifyCommand('git commit -m "$(cat msg)"'), { commit: true, integration: false });
+  assert.deepEqual(classifyCommand('git -C $(foo && git push'), push); // unbalanced: swallowed and classified
 });
