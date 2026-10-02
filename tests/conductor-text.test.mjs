@@ -58,3 +58,12 @@ test('manifests are 0.4.1', () => {
 test('0.4.1: the conductor tells agents a "counts as green" run satisfies the commit gate', () => {
   assert.match(read('skills/conductor/SKILL.md'), /prints `counts as green`/);
 });
+
+test('v0.4.2: conductor runs reviews through review-run.mjs', () => {
+  for (const s of ['scripts/review-run.mjs --reviewer codex', 'review-run.mjs --reviewer claude',
+    '--skill claude-headless', 'references/review-prompt.md', 'Exit 3', 'Exit 4', '`claude` CLI']) {
+    assert.ok(skill.includes(s), `SKILL.md missing: ${s}`);
+  }
+  assert.ok(!skill.includes('Re-ask ONCE'));
+  assert.ok(!skill.includes('codex-review-prompt.md'));
+});
