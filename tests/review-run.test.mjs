@@ -168,6 +168,19 @@ test('a write-check snapshot error in a git repo: exit 3 before any reviewer run
   assert.equal(calls(s), null, 'the reviewer was never spawned');
 });
 
+// Wave 4: only "not a git repository" turns the write check off; any other
+// root-discovery failure (here: safe.directory refusal) degrades before spawning.
+test('root discovery failing for another reason: exit 3 write check failed, reviewer never called', () => {
+  const s = setup();
+  const bin = mkdtempSync(join(tmpdir(), 'sd-rr-bin-'));
+  writeFileSync(join(bin, 'git'), "#!/bin/sh\necho \"fatal: detected dubious ownership in repository at '$PWD'\" >&2\nexit 128\n");
+  chmodSync(join(bin, 'git'), 0o755);
+  const r = run(s, CLAUDE, { env: { PATH: `${bin}:${process.env.PATH}` } });
+  assert.equal(r.status, 3, r.out);
+  assert.match(r.stdout, /--reason "write check failed: [^"]*dubious ownership[^"]*"/);
+  assert.equal(calls(s), null, 'the reviewer was never spawned');
+});
+
 test('outside a git repo the write check stays empty (no degrade on that alone)', () => {
   const s = setup();
   const plain = mkdtempSync(join(tmpdir(), 'sd-rr-plain-'));

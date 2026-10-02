@@ -162,14 +162,19 @@ async function review(o, env, degrade) {
     [cmd, args] = [env.SENIOR_DEV_CLAUDE_BIN || 'claude', ['-p', '--model', o.model, '--permission-mode', 'plan',
       '--allowedTools', CLAUDE_TOOLS, '--output-format', 'text', prompt]];
   }
-  let root = null; // not a git repository: no write check possible
-  try { root = git(process.cwd(), ['rev-parse', '--show-toplevel']).toString().trim() || null; } catch { /* stays null */ }
+  const checkFailed = (e) => degrade(`write check failed: ${String(e?.message ?? e).replaceAll('"', "'").replace(/\s+/g, ' ').trim()}`);
+  // Only git's own "not a git repository" turns the write check off; any
+  // other failure (no git, dubious ownership, corrupt .git) degrades.
+  let root = null;
+  try {
+    root = execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd: process.cwd(), encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+    if (!root) throw new Error('git rev-parse --show-toplevel printed nothing');
+  } catch (e) {
+    if (!/not a git repository/i.test(String(e.stderr ?? ''))) checkFailed(e);
+    root = null;
+  }
   const ms = timeoutMs(o, env);
-  const snap = () => {
-    try { return snapshot(root); } catch (e) {
-      degrade(`write check failed: ${String(e?.message ?? e).replaceAll('"', "'").replace(/\s+/g, ' ').trim()}`);
-    }
-  };
+  const snap = () => { try { return snapshot(root); } catch (e) { checkFailed(e); } };
 
   const mins = ms / MIN;
   const failures = [];
