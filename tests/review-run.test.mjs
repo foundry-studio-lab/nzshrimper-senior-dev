@@ -187,6 +187,18 @@ test('root discovery failing for another reason: exit 3 write check failed, revi
   assert.equal(calls(s), null, 'the reviewer was never spawned');
 });
 
+// Only git's own diagnosis (start of a stderr line) counts; a path that merely
+// contains the phrase must not disable the write check.
+test('dubious-ownership error whose path contains "not a git repository": exit 3, reviewer never called', () => {
+  const s = setup();
+  const bin = mkdtempSync(join(tmpdir(), 'sd-rr-bin-'));
+  writeFileSync(join(bin, 'git'), "#!/bin/sh\necho \"fatal: detected dubious ownership in repository at '/tmp/not a git repository/x'\" >&2\nexit 128\n");
+  chmodSync(join(bin, 'git'), 0o755);
+  const r = run(s, CLAUDE, { env: { PATH: `${bin}:${process.env.PATH}` } });
+  assert.equal(r.status, 3, r.out);
+  assert.equal(calls(s), null, 'the reviewer was never spawned');
+});
+
 test('outside a git repo the write check stays empty (no degrade on that alone)', () => {
   const s = setup();
   const plain = mkdtempSync(join(tmpdir(), 'sd-rr-plain-'));

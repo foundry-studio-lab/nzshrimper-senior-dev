@@ -178,7 +178,7 @@ async function review(o, env, degrade) {
     root = execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd: process.cwd(), encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
     if (!root) throw new Error('git rev-parse --show-toplevel printed nothing');
   } catch (e) {
-    if (!/not a git repository/i.test(String(e.stderr ?? ''))) checkFailed(e);
+    if (!/^fatal: not a git repository/m.test(String(e.stderr ?? ''))) checkFailed(e);
     root = null;
   }
   const ms = timeoutMs(o, env);
