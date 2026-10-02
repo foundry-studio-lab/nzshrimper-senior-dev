@@ -628,3 +628,42 @@ test('--affected: a pruned F.tree falls back to F.head', () => {
   assert.equal(cli(t.dir, ['test', '--affected']).status, 0);
   assert.deepEqual(readState(t.dir).testRuns.at(-1).files, ['b.js']);
 });
+
+// Final review F1: F.tree holds untracked files, so a tree-vs-worktree diff
+// saw an untracked file still on disk as deleted.
+test('--affected: an untracked file present at the full run and still there is not a deletion', () => {
+  const t = setup();
+  writeFileSync(join(t.dir, 'c.js'), 'c');
+  assert.equal(cli(t.dir, ['test', '--full']).status, 0);
+  writeFileSync(join(t.dir, 'b.js'), '2');
+  const r = cli(t.dir, ['test', '--affected']);
+  assert.equal(r.status, 0, r.out);
+  const run = readState(t.dir).testRuns.at(-1);
+  assert.equal(run.kind, 'affected');
+  assert.deepEqual(run.files, ['b.js']);
+});
+
+test('--affected: an untracked file present at the full run, then deleted, escalates to full', () => {
+  const t = setup();
+  writeFileSync(join(t.dir, 'c.js'), 'c');
+  assert.equal(cli(t.dir, ['test', '--full']).status, 0);
+  rmSync(join(t.dir, 'c.js'));
+  writeFileSync(join(t.dir, 'b.js'), '2');
+  assert.equal(cli(t.dir, ['test', '--affected']).status, 0);
+  assert.equal(readState(t.dir).testRuns.at(-1).kind, 'full');
+});
+
+// Final review F2: both F.tree and F.head unusable -> full, not a throw.
+test('--affected: a full run whose tree AND head are both gone escalates to full', () => {
+  const t = setup();
+  assert.equal(cli(t.dir, ['test', '--full']).status, 0);
+  const s = readState(t.dir);
+  s.testRuns.at(-1).tree = '0'.repeat(40);
+  s.testRuns.at(-1).head = '1'.repeat(40);
+  writeFileSync(join(t.dir, '.senior-dev', 'state.json'), JSON.stringify(s));
+  writeFileSync(join(t.dir, 'b.js'), '2');
+  const r = cli(t.dir, ['test', '--affected']);
+  assert.equal(r.status, 0, r.out);
+  const run = readState(t.dir).testRuns.at(-1);
+  assert.equal(run.kind, 'full'); assert.deepEqual(run.files, []);
+});
