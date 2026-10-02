@@ -558,6 +558,7 @@ switch (cmd) {
     console.log(`task:   ${state.task}`);
     console.log(`type:   ${state.type}`);
     for (const r of state.reclassifications || []) console.log(`reclassified: ${r.from} -> ${r.to} (${r.reason})${r.byOperator ? ' [operator]' : ''}`);
+    if (state.testsConfigChanges?.length) console.log(`tests config changed mid-session (${state.testsConfigChanges.length})`);
     console.log(`phase:  ${currentPhase(state) || '(all done)'}\n`);
     if (state.waiting) console.log(`WAITING on: ${state.waiting.on} (since ${state.waiting.at})\n`);
     if (state.skillSource) {
@@ -901,7 +902,14 @@ switch (cmd) {
         tests = Object.fromEntries(given.map((k) => [k, flags[k]]));
         if (!validTests(tests)) fail('set-tests --full needs a non-empty command');
       }
+      if (flags['by-operator'] !== undefined && flags['by-operator'] !== true) fail('set-tests --by-operator does not take a value');
       const cfg = readSkillsConfig(repoRoot) || { source: 'superpowers', shared: false };
+      const st = readState(repoRoot);
+      if (hasActiveSession(st) && st.testRuns?.length) {
+        if (flags['by-operator'] !== true) fail("set-tests refused - this session already has test runs; changing the commands now would change what those runs mean. Rerun with --by-operator (the operator's yes) to change them anyway.");
+        st.testsConfigChanges = [...(st.testsConfigChanges || []), { from: cfg.tests ?? null, to: tests, at: new Date().toISOString() }];
+        writeState(repoRoot, st);
+      }
       cfg.tests = tests;
       stampVersion(cfg);
       writeSkillsConfig(repoRoot, cfg);
