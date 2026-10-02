@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { writeState, readState, CHAINS, DOCS_GATE } from '../scripts/lib/state.mjs';
+import { writeState, readState, CHAINS, DOCS_GATE, openItems } from '../scripts/lib/state.mjs';
 
 const SCRIPT = new URL('../scripts/stop-gate.mjs', import.meta.url).pathname;
 
@@ -152,6 +152,14 @@ test('no tests config, everything else cleared: stop gate allows', () => {
   const repo = makeRepo();
   writeState(repo, clearedState());
   assert.equal(gate(repo).blocked, false);
+});
+
+test('openItems fails closed when evaluating the test rules throws', () => {
+  const repo = makeRepo();
+  writeCfg(repo, JSON.stringify({ version: 4, source: 'superpowers', shared: false, tests: { full: 'node --test' } }));
+  const state = clearedState();
+  Object.defineProperty(state, 'baseHead', { get() { throw new Error('boom'); } });
+  assert.deepEqual(openItems(repo, state), ['tests: could not evaluate the test rules (boom)']);
 });
 
 test('invalid skills.json with an open phase: stop gate still blocks', () => {

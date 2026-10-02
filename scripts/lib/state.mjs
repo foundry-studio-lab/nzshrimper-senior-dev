@@ -291,9 +291,9 @@ export function openGateItems(state) {
 // openGateItems plus the §3.3 test rules, for finish, status, the stop gate and
 // the session-start banner. Coverage of the main checkout's HEAD only when it
 // moved off baseHead (a local merge that a later push would ship with the
-// session gone). No tests config: exactly openGateItems. Any throw in the tests
-// half degrades to the gate items alone: the stop gate swallows errors and
-// exits 0, so a throw here must not silently disable it.
+// session gone). No tests config: exactly openGateItems. A throw in the tests
+// half fails closed (an extra open item): the stop gate swallows errors and
+// exits 0, and finish must not pass a test gate it could not evaluate.
 export function openItems(repoRoot, state) {
   const items = openGateItems(state);
   try {
@@ -303,8 +303,8 @@ export function openItems(repoRoot, state) {
     try { head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repoRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch { /* no commits */ }
     const trees = head !== (state.baseHead ?? null) ? [headTree(repoRoot)] : undefined;
     return [...items, ...testBlockers(state, { tests, trees, heads: [head] }).map((b) => `tests: ${b}`)];
-  } catch {
-    return items;
+  } catch (e) {
+    return [...items, `tests: could not evaluate the test rules (${e?.message ?? e})`];
   }
 }
 
