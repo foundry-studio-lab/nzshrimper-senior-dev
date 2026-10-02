@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.4.2 — 2026-10-02
+
+Hardening pass on the 0.4 test runner, plus a runner for reviews.
+
+- Command classifier: `$(...)`, backticks, `<(...)` / `>(...)`,
+  substitutions inside double quotes and tokens split by parentheses are now
+  seen as the commands they run, so a guarded push hidden in one is no
+  longer missed.
+- `openItems` is shared by every gate caller and fails closed: if the test
+  rules cannot be evaluated the item stays open with
+  `tests: could not evaluate the test rules (...)` instead of reading as met.
+- `skills-config set-tests` takes a lock, logs the change and shows the
+  tests config in the status line.
+- `test --affected` compares the full run's tree with the current
+  would-commit tree (tree to tree). Untracked files no longer trigger a
+  re-run or read as deleted; a full run missing `tree` or `head` falls back
+  to a full run.
+- New `scripts/review-run.mjs` runs one read-only review (Codex, or headless
+  `claude -p` for the Codex app) and prints the JSON verdict. Exit codes:
+  0 verdict, 2 usage, 3 degrade (prints the `state-cli degrade` line), 4 the
+  reviewer wrote to the repo. It runs async in a detached process group,
+  sends SIGTERM on timeout and SIGKILL after a 2 s grace, and handles
+  signals. The write check is status + HEAD + diff hash + would-commit tree
+  and fails closed on a snapshot or root error. Auth failures are read from
+  stderr. `SENIOR_DEV_REVIEW_RUN` stands down the stop gate and the
+  session-start banner while a runner review is live (honoured by those two
+  only).
+- The review prompt is renamed `review-prompt.md`. The conductor routes
+  Codex passes, and the Codex-app Claude pass (`--skill claude-headless`),
+  through the runner.
+
 ## 0.4.1 — 2026-10-01
 
 Fix found by SMOKE 25 on a real vitest project: in 0.4.0, once a

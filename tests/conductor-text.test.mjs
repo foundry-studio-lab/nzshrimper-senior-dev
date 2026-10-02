@@ -47,12 +47,12 @@ test('M3: gates section says a green test run satisfies the commit gate and inte
   assert.match(gates, /one full run[^.]*coverage on push\/PR/);
 });
 
-test('manifests are 0.4.1', () => {
+test('manifests are 0.4.2', () => {
   const p = JSON.parse(read('.claude-plugin/plugin.json'));
   const m = JSON.parse(read('.claude-plugin/marketplace.json'));
-  assert.equal(p.version, '0.4.1');
-  assert.equal(m.metadata.version, '0.4.1');
-  assert.equal(m.plugins[0].version, '0.4.1');
+  assert.equal(p.version, '0.4.2');
+  assert.equal(m.metadata.version, '0.4.2');
+  assert.equal(m.plugins[0].version, '0.4.2');
 });
 
 test('0.4.1: the conductor tells agents a "counts as green" run satisfies the commit gate', () => {
