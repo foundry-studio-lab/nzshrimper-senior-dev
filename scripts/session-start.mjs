@@ -4,7 +4,7 @@
 // Fail open: any error -> exit 0, no output.
 import { fileURLToPath } from 'node:url';
 import {
-  findRepoRoot, readState, hasActiveSession, currentPhase, openGateItems,
+  findRepoRoot, readState, hasActiveSession, currentPhase, openItems,
 } from './lib/state.mjs';
 
 // state-cli.mjs is a sibling of this file (both live in scripts/); resolve
@@ -28,6 +28,9 @@ async function readStdin() {
   return data;
 }
 
+// Inside a headless review-run reviewer: no bootstrap, no resume notice.
+if (process.env.SENIOR_DEV_REVIEW_RUN === '1') process.exit(0);
+
 try {
   let cwd = process.cwd();
   try {
@@ -41,7 +44,7 @@ try {
   let ctx = BOOTSTRAP;
   const state = readState(repoRoot);
   if (hasActiveSession(state)) {
-    const open = openGateItems(state);
+    const open = openItems(repoRoot, state);
     // state.waiting may be corrupt (hand-edited state.json, partial write) -
     // guard every property access rather than trust the shape; fail open by
     // just omitting the line if it doesn't look right.

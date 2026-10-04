@@ -62,6 +62,7 @@ const UNRESOLVED = '\0unresolved';
 // The literal path a token stands for, or null when the shell would expand
 // it. Placeholders map back to their quoted spans; single quotes are literal.
 function literalToken(token, quoted) {
+  if (token.includes('\0s')) return null; // command substitution
   if (/[$`]/.test(token.replace(/\0\d+\0/g, ''))) return null;
   let bad = false;
   const out = token.replace(/\0(\d+)\0/g, (_, n) => {
@@ -72,6 +73,43 @@ function literalToken(token, quoted) {
     return body.replace(/\\(["\\\n])/g, '$1');
   });
   return bad ? null : out;
+}
+
+// Replace each $(...), <(...), >(...) (depth-counted, so nesting and
+// $((...)) work) and `...` span with ONE placeholder token (\0s<n>\0), so
+// its inner `&&`/spaces cannot split the outer segment
+// (`git -C $(pwd) push`). The inner text is pushed onto `subs` and is
+// classified recursively. Backslash-escaped characters are skipped, so a
+// `\(` or `\)` cannot shift the depth. An unbalanced opener takes the rest
+// of the text with it (fail closed).
+function extractSubs(text, subs) {
+  let out = '';
+  for (let p = 0; p < text.length;) {
+    let end;
+    if (text[p] === '\\') {
+      out += text.slice(p, p + 2);
+      p += 2;
+      continue;
+    }
+    if (/[$<>]/.test(text[p]) && text[p + 1] === '(') {
+      let depth = 0;
+      for (end = p + 1; end < text.length; end++) {
+        if (text[end] === '\\') end++;
+        else if (text[end] === '(') depth++;
+        else if (text[end] === ')' && --depth === 0) break;
+      }
+      subs.push(text.slice(p + 2, end));
+    } else if (text[p] === '`') {
+      for (end = p + 1; end < text.length && text[end] !== '`'; end++) if (text[end] === '\\') end++;
+      subs.push(text.slice(p + 1, end));
+    } else {
+      out += text[p++];
+      continue;
+    }
+    out += `\0s${subs.length - 1}\0`;
+    p = end + 1;
+  }
+  return out;
 }
 
 function parseCommand(command) {
@@ -86,7 +124,15 @@ function parseCommand(command) {
   // contents stay in `quoted` for resolving `-C`.
   const noHeredocs = stripHeredocBodies(command);
   const quoted = [];
-  const stripped = noHeredocs.replace(/"(?:[^"\\]|\\.)*"|'[^']*'/g, (m) => `\0${quoted.push(m) - 1}\0`);
+  const quotedOnly = noHeredocs.replace(/"(?:[^"\\]|\\.)*"|'[^']*'/g, (m) => `\0${quoted.push(m) - 1}\0`);
+  // Unquoted substitutions become placeholder tokens (see extractSubs).
+  // Double-quoted bodies still expand $(...)/`...`, so their subs are
+  // collected for classification too, but the quoted span stays one token
+  // (`-C "..."` and `commit -m "$(cat msg)"` keep their shape). Single
+  // quotes are literal: never scanned.
+  const subs = [];
+  const stripped = extractSubs(quotedOnly, subs);
+  for (const q of quoted) if (q[0] === '"') extractSubs(q.slice(1, -1), subs);
   const segments = stripped.split(/&&|\|\||;|\n|\|/);
 
   let commit = false;
@@ -96,7 +142,9 @@ function parseCommand(command) {
   const integrations = [];
 
   for (const segment of segments) {
-    const tokens = segment.trim().split(/\s+/).filter(Boolean);
+    // Parens split too: `(git push)` subshells, and any stray `)` left by
+    // a substitution that closed early still yields a bare `push`.
+    const tokens = segment.trim().split(/[\s()]+/).filter(Boolean);
     // Skip leading NAME=value env assignments (HUSKY=0 git commit ...).
     let t = 0;
     while (t < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[t])) t++;
@@ -133,6 +181,15 @@ function parseCommand(command) {
         add(`pr-${rest[i + 1]}`);
       }
     }
+  }
+
+  // Substitutions run too: `echo $(git push)` pushes. Each sub is strictly
+  // shorter than its command, so the recursion ends.
+  for (const sub of subs) {
+    const inner = parseCommand(sub.replace(/\0(\d+)\0/g, (_, n) => quoted[n]));
+    commit ||= inner.commit;
+    integration ||= inner.integration;
+    integrations.push(...inner.integrations);
   }
 
   return { commit, integration, integrations };

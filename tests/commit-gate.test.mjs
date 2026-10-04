@@ -5,7 +5,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { writeState, readState, CHAINS, DOCS_GATE } from '../scripts/lib/state.mjs';
-import { classifyCommand } from '../scripts/commit-gate.mjs';
+import { classifyCommand, integrationTargets } from '../scripts/commit-gate.mjs';
+
+const UNRESOLVED_DIR = '\0unresolved';
 
 const SCRIPT = new URL('../scripts/commit-gate.mjs', import.meta.url).pathname;
 
@@ -82,6 +84,20 @@ test('integration blocked with blockers, allowed when clear', () => {
     docsGate: { spec: true, plan: true, handover: true, affectedDocs: true },
   }));
   assert.equal(gate(repo, 'git push origin main').blocked, false);
+});
+
+// v0.4.2 wave 2 N3: the review-run env quiets only stop-gate/session-start.
+test('SENIOR_DEV_REVIEW_RUN=1 does not open the commit gate: gated push still blocked', () => {
+  const repo = makeRepo();
+  writeState(repo, featureState());
+  let status = 0;
+  try {
+    execFileSync('node', [SCRIPT], {
+      encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, SENIOR_DEV_REVIEW_RUN: '1' },
+      input: JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'git push origin main' }, cwd: repo }),
+    });
+  } catch (e) { status = e.status; }
+  assert.equal(status, 2);
 });
 
 test('armed bypass allows one gated action and is consumed', () => {
@@ -354,4 +370,29 @@ test('split verdict blocks integration until that rejection is overruled; an uph
   assert.equal(gate(repo, 'git push origin main').blocked, true);   // wrong cycle
   writeState(repo, { ...base, adjudications: [{ phase: 'implement', reviewer: 'codex', cycle: 1, decision: 'overruled' }] });
   assert.equal(gate(repo, 'git push origin main').blocked, false);
+});
+
+test('v0.4.2: unquoted $() and backticks are one token; inner text is classified', () => {
+  const push = { commit: false, integration: true };
+  for (const c of ['git -C $(git rev-parse --show-toplevel) push', 'git -C $(pwd) push origin main',
+    'echo $(git push)', 'echo `git push`', 'echo $(echo $(git push))']) {
+    assert.deepEqual(classifyCommand(c), push, c);
+  }
+  assert.deepEqual(integrationTargets('git -C $(git rev-parse --show-toplevel) push'), [{ kind: 'push', dir: UNRESOLVED_DIR }]);
+  assert.deepEqual(integrationTargets('git -C $(pwd) push origin main'), [{ kind: 'push', dir: UNRESOLVED_DIR }]);
+  assert.deepEqual(integrationTargets('gh --repo $(echo o/r) pr create'), [{ kind: 'pr-create', dir: null }]);
+  assert.deepEqual(classifyCommand('git commit -m $(cat msg) && git push'), { commit: true, integration: true });
+  assert.deepEqual(classifyCommand('git commit -m "$(cat msg)"'), { commit: true, integration: false });
+  assert.deepEqual(classifyCommand('git -C $(foo && git push'), push); // unbalanced: swallowed and classified
+});
+
+test('v0.4.2 fix 1: stray/escaped parens, subshells, quoted and process substitutions classify', () => {
+  const push = { commit: false, integration: true };
+  for (const c of ['echo $(echo \\); git push)', 'echo $(echo \\( ; git push)',
+    'echo $(case x in a) echo;; esac; git push)', '(git push)',
+    'echo "$(git push)"', 'echo "`git push`"', 'cat <(git push)', 'tee >(git push)']) {
+    assert.deepEqual(classifyCommand(c), push, c);
+  }
+  assert.deepEqual(classifyCommand('git commit -m "$(cat msg)"'), { commit: true, integration: false });
+  assert.deepEqual(classifyCommand("echo '$(git push)'"), { commit: false, integration: false }); // single quotes are literal
 });

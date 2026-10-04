@@ -2,7 +2,7 @@
 
 > A disciplined senior developer, with a second reviewer over its shoulder, for every Claude Code coding session.
 
-![version](https://img.shields.io/badge/version-0.4.1-6b2c8a) ![license](https://img.shields.io/badge/license-MIT-1f3a5f) ![tests](https://img.shields.io/badge/tests-338%20passing-4a6b3a) ![Claude Code](https://img.shields.io/badge/Claude%20Code-plugin-1a1814)
+![version](https://img.shields.io/badge/version-0.4.2-6b2c8a) ![license](https://img.shields.io/badge/license-MIT-1f3a5f) ![tests](https://img.shields.io/badge/tests-394%20passing-4a6b3a) ![Claude Code](https://img.shields.io/badge/Claude%20Code-plugin-1a1814)
 
 senior-dev turns an ordinary coding session into a run with rails: it classifies
 the task, insists on the right chain of installed skills, reviews the work with
@@ -72,7 +72,18 @@ removes it, and confirms a clean tree before archiving the session:
 - **Codex phase reviews** — read-only Codex passes through the codex plugin's
   task lane at the phase's configured effort (`/codex:adversarial-review` stays
   available), a JSON verdict contract, a 3-cycle cap, and a post-review
-  write-detection guard.
+  write-detection guard. `scripts/review-run.mjs` runs these passes (and a
+  headless Claude pass for the Codex app, `--skill claude-headless`) as one
+  detached process with a timeout, and exits 0 (verdict), 2 (usage), 3 (degrade:
+  timeout, auth or reviewer failure) or 4 (the reviewer wrote to the repo).
+  It needs the `claude` CLI installed and logged in for the Claude lane.
+  Plan mode plus a tool allowlist (Claude lane) and Codex's read-only default
+  (no `--write`) are the primary protection; the allowlisted `git diff` /
+  `git show` / `git log` still accept write-capable options such as
+  `--output=<path>`, so this is not a strict guarantee. The
+  status/HEAD/diff/tree write check detects writes to tracked or untracked,
+  non-ignored paths after the fact (exit 4) but cannot see ignored paths.
+  Use `--timeout` for long reviews.
 - **Docs gate** — spec, plan, handover, affected docs.
 - **Hygiene sweep** — evidence-based zero-leftovers close.
 
@@ -270,4 +281,4 @@ with attention. Christchurch, NZ.
 ---
 
 [MIT License](LICENSE) · [Privacy](PRIVACY.md) — senior-dev collects nothing
-and runs entirely on your machine.
+and runs on your machine (review runs hand the repo to your own Codex or claude CLI).

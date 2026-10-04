@@ -569,14 +569,15 @@ test('N3: an in-repo report path starting with ".." is still warned about', () =
   assert.ok(r.stderr.includes('not git-ignored'), r.stderr);
 });
 
-test('F2: empty file list at a tree other than the full run\'s runs full', () => {
+test('F2: reverting to HEAD after a full run at an uncommitted tree is affected vs that tree (v0.4.2 §3.4)', () => {
   const t = setup();
   writeFileSync(join(t.dir, 'a.js'), '2');
   assert.equal(cli(t.dir, ['test', '--full']).status, 0); // full at the uncommitted tree
-  writeFileSync(join(t.dir, 'a.js'), '1'); // back to HEAD: no diff vs full.head, other tree
+  writeFileSync(join(t.dir, 'a.js'), '1'); // back to HEAD: differs from the tested tree
   assert.equal(cli(t.dir, ['test', '--affected']).status, 0);
-  assert.equal(readState(t.dir).testRuns[1].kind, 'full');
-  assert.equal(t.markers().length, 2);
+  const run = readState(t.dir).testRuns[1];
+  assert.equal(run.kind, 'affected');
+  assert.deepEqual(run.files, ['a.js']);
 });
 
 test('F4: explicit --affected files are unioned with the changed files', () => {
@@ -585,4 +586,84 @@ test('F4: explicit --affected files are unioned with the changed files', () => {
   assert.equal(cli(t.dir, ['test', '--affected', 'unrelated.js']).status, 0);
   assert.deepEqual(readState(t.dir).testRuns[0].files, ['a.js', 'unrelated.js']);
   assert.ok(t.markers().at(-1).endsWith('REL a.js unrelated.js'));
+});
+
+// v0.4.2 §3.4: --affected diffs against the tree the full run tested.
+test('--affected: a file edited, tested by a full run, then committed is not affected', () => {
+  const t = setup();
+  writeFileSync(join(t.dir, 'a.js'), '2');
+  assert.equal(cli(t.dir, ['test', '--full']).status, 0);
+  g(t.dir, 'add', 'a.js'); g(t.dir, 'commit', '-qm', 'a');
+  writeFileSync(join(t.dir, 'b.js'), '2'); // forces a real affected run, not nothing-to-run
+  assert.equal(cli(t.dir, ['test', '--affected']).status, 0);
+  assert.deepEqual(readState(t.dir).testRuns.at(-1).files, ['b.js']);
+});
+
+test('--affected: an edit after the full run is affected', () => {
+  const t = setup();
+  writeFileSync(join(t.dir, 'a.js'), '2');
+  assert.equal(cli(t.dir, ['test', '--full']).status, 0);
+  writeFileSync(join(t.dir, 'b.js'), '2');
+  assert.equal(cli(t.dir, ['test', '--affected']).status, 0);
+  assert.deepEqual(readState(t.dir).testRuns.at(-1).files, ['b.js']);
+});
+
+test('--affected: a tracked file deleted after the full run escalates to full', () => {
+  const t = setup();
+  assert.equal(cli(t.dir, ['test', '--full']).status, 0);
+  rmSync(join(t.dir, 'b.js'));
+  assert.equal(cli(t.dir, ['test', '--affected']).status, 0);
+  assert.equal(readState(t.dir).testRuns.at(-1).kind, 'full');
+});
+
+test('--affected: a pruned F.tree falls back to F.head', () => {
+  const t = setup();
+  writeFileSync(join(t.dir, 'a.js'), '2');
+  g(t.dir, 'add', 'a.js'); g(t.dir, 'commit', '-qm', 'a');
+  assert.equal(cli(t.dir, ['test', '--full']).status, 0);
+  const s = readState(t.dir);
+  s.testRuns.at(-1).tree = '0'.repeat(40);
+  writeFileSync(join(t.dir, '.senior-dev', 'state.json'), JSON.stringify(s));
+  writeFileSync(join(t.dir, 'b.js'), '2');
+  assert.equal(cli(t.dir, ['test', '--affected']).status, 0);
+  assert.deepEqual(readState(t.dir).testRuns.at(-1).files, ['b.js']);
+});
+
+// Final review F1: F.tree holds untracked files, so a tree-vs-worktree diff
+// saw an untracked file still on disk as deleted.
+test('--affected: an untracked file present at the full run and still there is not a deletion', () => {
+  const t = setup();
+  writeFileSync(join(t.dir, 'c.js'), 'c');
+  assert.equal(cli(t.dir, ['test', '--full']).status, 0);
+  writeFileSync(join(t.dir, 'b.js'), '2');
+  const r = cli(t.dir, ['test', '--affected']);
+  assert.equal(r.status, 0, r.out);
+  const run = readState(t.dir).testRuns.at(-1);
+  assert.equal(run.kind, 'affected');
+  assert.deepEqual(run.files, ['b.js']);
+});
+
+test('--affected: an untracked file present at the full run, then deleted, escalates to full', () => {
+  const t = setup();
+  writeFileSync(join(t.dir, 'c.js'), 'c');
+  assert.equal(cli(t.dir, ['test', '--full']).status, 0);
+  rmSync(join(t.dir, 'c.js'));
+  writeFileSync(join(t.dir, 'b.js'), '2');
+  assert.equal(cli(t.dir, ['test', '--affected']).status, 0);
+  assert.equal(readState(t.dir).testRuns.at(-1).kind, 'full');
+});
+
+// Final review F2: both F.tree and F.head unusable -> full, not a throw.
+test('--affected: a full run whose tree AND head are both gone escalates to full', () => {
+  const t = setup();
+  assert.equal(cli(t.dir, ['test', '--full']).status, 0);
+  const s = readState(t.dir);
+  s.testRuns.at(-1).tree = '0'.repeat(40);
+  s.testRuns.at(-1).head = '1'.repeat(40);
+  writeFileSync(join(t.dir, '.senior-dev', 'state.json'), JSON.stringify(s));
+  writeFileSync(join(t.dir, 'b.js'), '2');
+  const r = cli(t.dir, ['test', '--affected']);
+  assert.equal(r.status, 0, r.out);
+  const run = readState(t.dir).testRuns.at(-1);
+  assert.equal(run.kind, 'full'); assert.deepEqual(run.files, []);
 });

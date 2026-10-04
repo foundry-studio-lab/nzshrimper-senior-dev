@@ -5,7 +5,7 @@
 import { readFileSync } from 'node:fs';
 import {
   findRepoRoot, readState, writeState, hasActiveSession, currentPhase,
-  openGateItems, snapshotHash,
+  openItems, snapshotHash,
 } from './lib/state.mjs';
 
 // Deliberately loose - overfires on phrases like "one item done"; bounded by
@@ -36,6 +36,9 @@ async function readStdin() {
   return data;
 }
 
+// Inside a headless review-run reviewer: never block or write state.
+if (process.env.SENIOR_DEV_REVIEW_RUN === '1') process.exit(0);
+
 try {
   const data = JSON.parse(await readStdin());
   if (data.stop_hook_active) process.exit(0);
@@ -51,7 +54,7 @@ try {
   // a fresh challenge instead of reading as "already seen".
   if (state.waiting) process.exit(0);
 
-  const items = openGateItems(state);
+  const items = openItems(repoRoot, state);
   if (!items.length) process.exit(0);
 
   const finishing = currentPhase(state) === 'finish';

@@ -1,5 +1,47 @@
 # Changelog
 
+## 0.4.2 — 2026-10-02
+
+Hardening pass on the 0.4 test runner, plus a runner for reviews.
+
+- Command classifier: `$(...)`, backticks, `<(...)` / `>(...)`,
+  substitutions inside double quotes (when the substitution has no nested
+  double quotes) and tokens split by parentheses are now seen as the
+  commands they run, so a guarded push hidden in one is no longer missed.
+- `openItems` is shared by status, finish, the stop gate and the
+  session-start banner, and fails closed: if evaluating the test rules of a
+  valid tests config throws, the item stays open with
+  `tests: could not evaluate the test rules (...)` instead of reading as met.
+  A corrupt or unreadable `skills.json` still reads as "no tests config"
+  (`readSkillsConfig` returns null).
+- `skills-config set-tests` is refused once the active session has test
+  runs, unless `--by-operator` (the operator's yes); such a change is logged
+  to `state.testsConfigChanges` and `status` prints
+  `tests config changed mid-session (N)`.
+- The stop gate and the session-start banner now list open test items too.
+- `test --affected` compares the full run's tree with the current
+  would-commit tree (tree to tree). An untracked file already present at
+  the full run (and still present) no longer reads as deleted or forces a
+  full run; a file created after the full run is affected, as it should be.
+  The base is the full run's `tree`, else its `head`, else a full run (only
+  when both are unusable).
+- New `scripts/review-run.mjs` runs one read-only review (Codex, or headless
+  `claude -p` for the Codex app) and prints the JSON verdict. Exit codes:
+  0 verdict, 2 usage, 3 degrade (prints the `state-cli degrade` line), 4 the
+  reviewer wrote to the repo. It runs async in a detached process group,
+  sends SIGTERM on timeout and SIGKILL after a 2 s grace, and handles
+  signals. The write check is status + HEAD + diff hash + would-commit tree
+  and fails closed (exit 3) on a snapshot error or any root-discovery error
+  except git's own "fatal: not a git repository" diagnosis (at the start of
+  a stderr line), which runs the review with no write check. Auth failures are read from
+  stderr. `SENIOR_DEV_REVIEW_RUN` stands down the stop gate and the
+  session-start banner while a runner review is live (honoured by those two
+  only).
+- PRIVACY.md discloses that review-run.mjs hands the repository to your installed Codex or claude CLI.
+- The review prompt is renamed `review-prompt.md`. The conductor routes
+  Codex passes, and the Codex-app Claude pass (`--skill claude-headless`),
+  through the runner.
+
 ## 0.4.1 — 2026-10-01
 
 Fix found by SMOKE 25 on a real vitest project: in 0.4.0, once a

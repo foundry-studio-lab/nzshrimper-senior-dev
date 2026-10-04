@@ -76,6 +76,10 @@ Setup: `mkdir -p <scratch>/sd-smoke && cd <scratch>/sd-smoke && git init && git 
         tests every scoped run was red, so commits and push coverage were
         impossible - fixed in 0.4.1 (`counts as green`); the same script
         fails 11 checks on 0.4.0.
+        Re-run 2026-10-02 against 0.4.2: PASSED 24/24. One expectation changed
+        by design (§3.4): after a later commit that touches only
+        test/other.test.js, --affected now runs only that file (green) instead
+        of re-running the unchanged math tests red on the proven failure.
 26. [x] Reclassify: quick-fix session -> `state-cli reclassify --type
         bug-fix --reason "grew"` -> same session, phases kept, `status`
         shows the history; `--type docs-only` refused without `--by-operator`.
@@ -104,3 +108,9 @@ Setup: `mkdir -p <scratch>/sd-smoke && cd <scratch>/sd-smoke && git init && git 
         on base and re-added in another file refused as a different test; a
         directory instead of a glob (`test/`) refused as "passed no tests".
         Re-run after any change to the proof, `parseJUnit` or `testBlockers`.
+        Re-run 2026-10-02 against 0.4.2: PASSED (all checks).
+29. [x] Live `review-run.mjs` on a scratch repo with a planted off-by-one:
+        PASSED 6/6 on 2026-10-02. Headless claude (sonnet): exit 0,
+        NEEDS_REVISION naming the bug, 11 s. Codex lane (effort low): exit 0,
+        NEEDS_REVISION, 25 s. `git status` and HEAD unchanged for both. The
+        runner also ran this branch's own Codex reviews live (cycles 1-4).

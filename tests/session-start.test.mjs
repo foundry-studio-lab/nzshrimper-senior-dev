@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -17,6 +17,20 @@ function run(cwd, stdinObj = {}) {
 test('outside a git repo: silent, exit 0', () => {
   const dir = mkdtempSync(join(tmpdir(), 'sd-ss-norepo-'));
   assert.equal(run(dir), '');
+});
+
+// v0.4.2 wave 2 N3: inside a headless review-run reviewer: silence.
+test('SENIOR_DEV_REVIEW_RUN=1: no output even in a repo with a session', () => {
+  const repo = mkdtempSync(join(tmpdir(), 'sd-ss-rr-'));
+  execFileSync('git', ['init', '-q', repo]);
+  writeState(repo, {
+    version: 1, task: 't', type: 'feature', startedAt: 'x', chain: CHAINS['feature'], phases: {},
+    reviews: [], docsGate: { ...DOCS_GATE['feature'] }, degradations: [], bypasses: [], stopGate: { lastSnapshotHash: null },
+  });
+  const out = execFileSync('node', [SCRIPT], {
+    cwd: repo, encoding: 'utf8', input: JSON.stringify({ cwd: repo }), env: { ...process.env, SENIOR_DEV_REVIEW_RUN: '1' },
+  });
+  assert.equal(out, '');
 });
 
 test('in a repo with no session: emits bootstrap context', () => {
@@ -83,4 +97,32 @@ test('malformed stdin: still works from process cwd', () => {
   const out = execFileSync('node', [SCRIPT], { cwd: repo, encoding: 'utf8', input: 'not-json' });
   assert.ok(out.includes('senior-dev:conductor'));
   assert.ok(out.includes('state-cli.mjs'));
+});
+
+// v0.4.2 §3.2: the banner lists test items too. All non-test items cleared.
+function clearedRepo(withTests) {
+  const repo = mkdtempSync(join(tmpdir(), 'sd-ss-tests-'));
+  execFileSync('git', ['init', '-q', repo]);
+  writeState(repo, {
+    version: 1, task: 'cleared', type: 'quick-fix', startedAt: 'x',
+    chain: CHAINS['quick-fix'],
+    phases: Object.fromEntries(CHAINS['quick-fix'].map((p) => [p, { status: 'done' }])),
+    reviews: [], docsGate: Object.fromEntries(Object.keys(DOCS_GATE['quick-fix']).map((k) => [k, true])),
+    degradations: [], bypasses: [], stopGate: { lastSnapshotHash: null },
+  });
+  if (withTests) {
+    mkdirSync(join(repo, '.senior-dev'), { recursive: true });
+    writeFileSync(join(repo, '.senior-dev', 'skills.json'), JSON.stringify({ version: 4, source: 'superpowers', shared: false, tests: { full: 'node --test' } }));
+  }
+  return repo;
+}
+
+test('banner lists the test item when tests are configured', () => {
+  const ctx = JSON.parse(run(clearedRepo(true))).hookSpecificOutput.additionalContext;
+  assert.ok(ctx.includes('tests: no full test run recorded'));
+});
+
+test('banner without a tests config has no tests item', () => {
+  const ctx = JSON.parse(run(clearedRepo(false))).hookSpecificOutput.additionalContext;
+  assert.equal(ctx.split('\n').find((l) => l.startsWith('open gate items:')), 'open gate items: none');
 });

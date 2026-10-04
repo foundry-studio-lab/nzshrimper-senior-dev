@@ -27,7 +27,9 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/state-cli.mjs" <subcommand> [flags]
    install` (consent already given) so the hooks carry the current gate
    logic. If it prints a `codex:` update line, offer `codex update` before
    the first Codex pass —
-   the review lanes use whatever CLI is on PATH.
+   the review lanes use whatever CLI is on PATH. In a Codex-app host (no
+   Claude subagent tool) check the `claude` CLI is present
+   (`claude --version`); the Claude review pass runs through it.
 2. **Skill source (fresh run only, before classifying).** Decide which skills
    fill the process phases this run. Run `node <plugin>/scripts/state-cli.mjs
    skills-config show`.
@@ -292,26 +294,27 @@ contract. A fresh subagent inherits nothing.
    beyond it, and behaviour that contradicts it as concerns." Fix findings via
    `superpowers:systematic-debugging` + TDD, never by patching blind.
    - Record: `state-cli review --phase <phase> --reviewer claude --verdict <V> --cycle <n> --skill <the skill that ran>`
+   - A host with no Claude subagent tool (the Codex app): run the same runner
+     as `review-run.mjs --reviewer claude --phase <phase> --range <a..b> --spec <path|none> --model <the claude= tier from state-cli models --phase review>`
+     (same background + `waiting` handling and exit codes as step 2) and record
+     with `--skill claude-headless`.
 2. Codex pass (READ-ONLY, never `--write`):
-   - Capture `git status --porcelain` and `git log -1 --format=%H` BEFORE.
    - Read the effort: `state-cli models --phase review` for a per-phase pass,
      `state-cli models --phase finish` for the final whole-branch pass →
      `codex=<effort>`. (The lookup names the review's own tier row, not the
      phase being reviewed, which has no Codex effort.)
-   - Locate the codex plugin's companion script:
-     `ls -d ~/.claude/plugins/cache/*/codex/*/scripts/codex-companion.mjs | tail -1`
-     (the codex plugin's own `${CLAUDE_PLUGIN_ROOT}` is not visible from here).
-     Not found → run `/codex:review` instead and record
-     `state-cli degrade --wanted "codex task --effort" --used "/codex:review" --reason "companion script not found"`.
-   - Run `node <that path> task --fresh --effort <effort> "<prompt>"` with the
-     prompt built from `references/codex-review-prompt.md` (fill the diff range,
-     phase, and `<SPEC>` - the committed spec path, or `none`). It asks for the JSON verdict as the only reply and tells Codex
-     to check any repo document or policy the diff touches.
+   - Run the runner (it finds the codex companion, checks the repo before and
+     after, and retries once on a non-JSON reply itself):
+     `node <plugin>/scripts/review-run.mjs --reviewer codex --phase <phase> --range <a..b> --spec <path|none> --effort <effort>`
+     (`--spec` is the committed spec path, or `none`; the prompt is
+     `references/review-prompt.md`). Run it in the background (Bash
+     `run_in_background`) and arm `state-cli waiting --on "codex review"`
+     while it runs; clear it when it returns.
      `/codex:adversarial-review` stays available to the operator directly.
-   - Reply isn't the exact JSON contract? Re-ask ONCE for JSON-only. Still
-     not JSON → record `NEEDS_REVISION` and tell the operator.
-   - Re-run the two git commands AFTER. Any difference = Codex wrote to the
-     repo: stop everything and tell the operator immediately.
+   - Exit 0 → it prints the verdict JSON; record that verdict. Exit 3 (Codex
+     unusable) → run the printed `state-cli degrade` line and tell the
+     operator. Exit 4 (`WRITE DETECTED`) → stop everything and tell the
+     operator immediately. Exit 2 is a usage error: fix the flags.
    - Record: `state-cli review --phase <phase> --reviewer codex --verdict <V> --cycle <n>`
 3. `NEEDS_REVISION` → address concerns → re-review at cycle n+1. Cycle
    counters restart at 1 for each new `--phase` value - they don't carry
@@ -365,7 +368,8 @@ step 1 (no Codex pass on prose). `investigation` skips both 1 and 2 (no
 branch exists) and goes straight to the sweep.
 
 1. Final review passes - Claude (§3 step 1 naming rules) + read-only Codex - over the
-   complete branch diff, same procedure and recording as §3 (the Claude
+   complete branch diff, same procedure, runner (`review-run.mjs`, effort from
+   `state-cli models --phase finish`) and recording as §3 (the Claude
    record carries `--skill <the skill that ran>`), recorded as
    `--phase finish`. Where the lane had a single implement phase already
    reviewed in full (§3), scope the final pass to integration diffs and

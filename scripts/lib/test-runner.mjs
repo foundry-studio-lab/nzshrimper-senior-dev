@@ -81,15 +81,15 @@ function headSha(cwd) {
   try { return gitOut(cwd, ['rev-parse', 'HEAD']); } catch { return null; }
 }
 
-// Files changed since `base` (plus untracked), and whether any was deleted.
-// --no-renames: a renamed-away path is a deletion (its importers break).
-function changedFiles(cwd, base) {
+// Files changed from `base` to the would-commit `tree` (which already holds
+// untracked files), and whether any was deleted. Tree-to-tree: a worktree
+// diff reports a path in `base` but not in the index as deleted even when it
+// is on disk untracked. --no-renames: a renamed-away path is a deletion.
+function changedFiles(cwd, base, tree) {
   // -z: git otherwise C-quotes non-ASCII paths.
-  const list = (args) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).split('\0').filter(Boolean);
-  const out = new Set(list(['ls-files', '-z', '--others', '--exclude-standard']));
-  for (const f of list(['diff', '-z', '--name-only', '--no-renames', '--diff-filter=d', base])) out.add(f);
-  const deleted = list(['diff', '-z', '--name-only', '--no-renames', '--diff-filter=D', base]).length > 0;
-  return { files: [...out], deleted };
+  const list = (filter) => execFileSync('git', ['diff', '-z', '--name-only', '--no-renames', `--diff-filter=${filter}`, base, tree],
+    { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).split('\0').filter(Boolean);
+  return { files: list('d'), deleted: list('D').length > 0 };
 }
 
 // fail -> pass -> fail as a subsequence of the outcomes.
@@ -149,18 +149,19 @@ export function runTest({ repoRoot, cwd, state, cfg, kind, files, test }) {
   if (kind === 'affected' && !nothing) {
     if (!t.related) cmdKind = 'full';
     else {
-      // A full run taken before the first commit has no head: diff against
-      // the tree it tested (modified and deleted since), or run the full
-      // suite if gc has pruned that tree. With no full run and no commit,
-      // use the empty tree (asked of git: its id depends on the object
+      // Diff against the tree the latest full run tested (what changed since
+      // it, committed or not), falling back to its head if gc pruned that
+      // tree, or the full suite if neither is usable. With no full run and no
+      // commit, use the empty tree (asked of git: its id depends on the object
       // format), so every file counts as affected.
       const emptyTree = () => gitOut(cwd, ['hash-object', '-t', 'tree', '/dev/null']);
       const hasObject = (id) => { try { gitOut(cwd, ['cat-file', '-e', id]); return true; } catch { return false; } };
       const F = last('full');
-      const base = F ? (F.head || (F.tree && hasObject(F.tree) ? F.tree : null))
+      const usable = (id) => !!id && hasObject(id);
+      const base = F ? (usable(F.tree) ? F.tree : usable(F.head) ? F.head : null)
         : (state.baseHead || (headSha(cwd) ? 'HEAD' : emptyTree()));
       if (!base) { cmdKind = 'full'; deleted = true; } else {
-        const changed = changedFiles(cwd, base);
+        const changed = changedFiles(cwd, base, tree);
         deleted = changed.deleted;
         // Explicit files add to the changed list, never replace it.
         runFiles = [...new Set([...(files || []), ...changed.files])].sort();

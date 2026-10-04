@@ -4,7 +4,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { readState, readSkillsConfig, writeSkillsConfig, validTests } from '../scripts/lib/state.mjs';
+import { readState, writeState, readSkillsConfig, writeSkillsConfig, validTests } from '../scripts/lib/state.mjs';
 
 const CLI = new URL('../scripts/state-cli.mjs', import.meta.url).pathname;
 function makeRepo() {
@@ -81,6 +81,53 @@ test('init records baseHead and baseRefs', () => {
   const s = readState(repo);
   assert.equal(s.baseHead, head);
   assert.deepEqual(s.baseRefs, { [main]: head, 'refs/heads/other': head });
+});
+
+// --- set-tests locked mid-session (v0.4.2 section 3.3) ---
+const REFUSAL = "set-tests refused - this session already has test runs; changing the commands now would change what those runs mean. Rerun with --by-operator (the operator's yes) to change them anyway.";
+function sessionWithRuns() {
+  const repo = makeRepo();
+  assert.equal(cli(repo, ['init', '--task', 't', '--type', 'quick-fix']).status, 0);
+  assert.equal(cli(repo, ['skills-config', 'set-tests', '--full', 'npm test']).status, 0);
+  const s = readState(repo);
+  s.testRuns = [{ at: new Date().toISOString(), command: 'npm test', exit: 0 }];
+  writeState(repo, s);
+  return repo;
+}
+
+test('set-tests is refused while the session has test runs', () => {
+  const repo = sessionWithRuns();
+  const r = cli(repo, ['skills-config', 'set-tests', '--full', 'x']);
+  assert.notEqual(r.status, 0);
+  assert.ok(r.out.includes(REFUSAL), r.out);
+  assert.deepEqual(readSkillsConfig(repo).tests, { full: 'npm test' });
+});
+
+test('set-tests --by-operator changes the commands and logs the change', () => {
+  const repo = sessionWithRuns();
+  const r = cli(repo, ['skills-config', 'set-tests', '--full', 'x', '--by-operator']);
+  assert.equal(r.status, 0, r.out);
+  const s = readState(repo);
+  assert.equal(s.testsConfigChanges.length, 1);
+  assert.deepEqual(s.testsConfigChanges[0].from, { full: 'npm test' });
+  assert.deepEqual(s.testsConfigChanges[0].to, { full: 'x' });
+  assert.deepEqual(readSkillsConfig(repo).tests, { full: 'x' });
+  assert.ok(cli(repo, ['status']).out.includes('tests config changed mid-session (1)'));
+});
+
+test('set-tests --by-operator rejects a value', () => {
+  const repo = sessionWithRuns();
+  const r = cli(repo, ['skills-config', 'set-tests', '--full', 'x', '--by-operator', 'yes']);
+  assert.notEqual(r.status, 0);
+  assert.ok(r.out.includes('set-tests --by-operator does not take a value'), r.out);
+});
+
+test('set-tests is unchanged for a session with no runs and for no session', () => {
+  const repo = makeRepo();
+  assert.equal(cli(repo, ['init', '--task', 't', '--type', 'quick-fix']).status, 0);
+  assert.equal(cli(repo, ['skills-config', 'set-tests', '--full', 'x']).status, 0);
+  assert.equal(readState(repo).testsConfigChanges, undefined);
+  assert.equal(cli(makeRepo(), ['skills-config', 'set-tests', '--full', 'x']).status, 0);
 });
 
 test('init in a repo with no commits records null baseHead and empty baseRefs', () => {

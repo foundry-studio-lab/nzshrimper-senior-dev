@@ -7,7 +7,7 @@ import { join, dirname } from 'node:path';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (p) => readFileSync(join(root, p), 'utf8');
 const skill = read('skills/conductor/SKILL.md');
-const prompt = read('skills/conductor/references/codex-review-prompt.md');
+const prompt = read('skills/conductor/references/review-prompt.md');
 
 test('conductor names the v0.4 CLI surface', () => {
   for (const s of ['state-cli test --affected', 'state-cli test --full', 'test --preexisting', 'CONTRADICTION',
@@ -47,14 +47,23 @@ test('M3: gates section says a green test run satisfies the commit gate and inte
   assert.match(gates, /one full run[^.]*coverage on push\/PR/);
 });
 
-test('manifests are 0.4.1', () => {
+test('manifests are 0.4.2', () => {
   const p = JSON.parse(read('.claude-plugin/plugin.json'));
   const m = JSON.parse(read('.claude-plugin/marketplace.json'));
-  assert.equal(p.version, '0.4.1');
-  assert.equal(m.metadata.version, '0.4.1');
-  assert.equal(m.plugins[0].version, '0.4.1');
+  assert.equal(p.version, '0.4.2');
+  assert.equal(m.metadata.version, '0.4.2');
+  assert.equal(m.plugins[0].version, '0.4.2');
 });
 
 test('0.4.1: the conductor tells agents a "counts as green" run satisfies the commit gate', () => {
   assert.match(read('skills/conductor/SKILL.md'), /prints `counts as green`/);
+});
+
+test('v0.4.2: conductor runs reviews through review-run.mjs', () => {
+  for (const s of ['scripts/review-run.mjs --reviewer codex', 'review-run.mjs --reviewer claude',
+    '--skill claude-headless', 'references/review-prompt.md', 'Exit 3', 'Exit 4', '`claude` CLI']) {
+    assert.ok(skill.includes(s), `SKILL.md missing: ${s}`);
+  }
+  assert.ok(!skill.includes('Re-ask ONCE'));
+  assert.ok(!skill.includes('codex-review-prompt.md'));
 });
