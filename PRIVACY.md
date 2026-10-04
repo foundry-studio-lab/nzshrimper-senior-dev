@@ -7,8 +7,11 @@
 ## The short version
 
 senior-dev collects nothing and stores nothing off your machine. It runs
-entirely locally, inside your own Claude Code environment. Its one outbound
+locally, inside your own Claude Code environment. Its own one outbound
 request is a version lookup, described below, which carries no data about you.
+Its review runner hands your repository to the Codex or `claude` CLI you
+installed, which sends it to that provider under its own terms (see
+"Third-party tools you invoke").
 
 ## What the plugin does with data
 
