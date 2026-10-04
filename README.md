@@ -2,7 +2,7 @@
 
 > A disciplined senior developer, with a second reviewer over its shoulder, for every Claude Code coding session.
 
-![version](https://img.shields.io/badge/version-0.4.2-6b2c8a) ![license](https://img.shields.io/badge/license-MIT-1f3a5f) ![tests](https://img.shields.io/badge/tests-393%20passing-4a6b3a) ![Claude Code](https://img.shields.io/badge/Claude%20Code-plugin-1a1814)
+![version](https://img.shields.io/badge/version-0.4.2-6b2c8a) ![license](https://img.shields.io/badge/license-MIT-1f3a5f) ![tests](https://img.shields.io/badge/tests-394%20passing-4a6b3a) ![Claude Code](https://img.shields.io/badge/Claude%20Code-plugin-1a1814)
 
 senior-dev turns an ordinary coding session into a run with rails: it classifies
 the task, insists on the right chain of installed skills, reviews the work with
@@ -281,4 +281,4 @@ with attention. Christchurch, NZ.
 ---
 
 [MIT License](LICENSE) · [Privacy](PRIVACY.md) — senior-dev collects nothing
-and runs entirely on your machine.
+and runs on your machine (review runs hand the repo to your own Codex or claude CLI).

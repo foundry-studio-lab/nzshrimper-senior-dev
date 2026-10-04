@@ -199,6 +199,20 @@ test('dubious-ownership error whose path contains "not a git repository": exit 3
   assert.equal(calls(s), null, 'the reviewer was never spawned');
 });
 
+// A .git file pointing at a missing gitdir makes git say
+// "fatal: not a git repository: <gitdir>", which is NOT the outside-a-repo form.
+test('corrupt .git pointer file: exit 3, reviewer never called (real git)', () => {
+  const s = setup();
+  const bad = mkdtempSync(join(tmpdir(), 'sd-rr-bad-'));
+  writeFileSync(join(bad, '.git'), 'gitdir: /nonexistent/x\n');
+  const r = spawnSync('node', [RUNNER, ...CLAUDE], {
+    cwd: bad, encoding: 'utf8',
+    env: { ...process.env, FAKE_DIR: s.fake, FAKE_MODE: 'json', SENIOR_DEV_CLAUDE_BIN: s.claude, SENIOR_DEV_REVIEW_TIMEOUT_MS: '1500' },
+  });
+  assert.equal(r.status, 3, r.stdout + r.stderr);
+  assert.equal(calls(s), null, 'the reviewer was never spawned');
+});
+
 test('outside a git repo the write check stays empty (no degrade on that alone)', () => {
   const s = setup();
   const plain = mkdtempSync(join(tmpdir(), 'sd-rr-plain-'));

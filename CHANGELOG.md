@@ -37,6 +37,7 @@ Hardening pass on the 0.4 test runner, plus a runner for reviews.
   stderr. `SENIOR_DEV_REVIEW_RUN` stands down the stop gate and the
   session-start banner while a runner review is live (honoured by those two
   only).
+- PRIVACY.md discloses that review-run.mjs hands the repository to your installed Codex or claude CLI.
 - The review prompt is renamed `review-prompt.md`. The conductor routes
   Codex passes, and the Codex-app Claude pass (`--skill claude-headless`),
   through the runner.
