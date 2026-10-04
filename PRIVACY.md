@@ -15,7 +15,7 @@ installed, which sends it to that provider under its own terms (see
 
 ## What the plugin does with data
 
-Everything senior-dev touches stays on your computer:
+senior-dev's own data stays on your computer:
 
 - **Session state.** It reads and writes `.senior-dev/state.json` and
   `.senior-dev/skills.json` in the repository you are working in, and archives
