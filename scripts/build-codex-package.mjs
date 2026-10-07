@@ -46,9 +46,19 @@ function checkOut(repoRoot, out) {
   if (inside(out, repoRoot) && !inside(out, join(repoRoot, 'dist')) || out === join(repoRoot, 'dist')) {
     throw new Error(`refusing --out ${out}: inside the repository only dist/<folder> may be written`);
   }
-  if (existsSync(out) && readdirSync(out).length && !existsSync(join(out, '.agents', 'plugins', 'marketplace.json'))) {
-    throw new Error(`refusing --out ${out}: it is a non-empty folder that is not a previous build`);
+  if (existsSync(out) && readdirSync(out).length && !previousBuild(out)) {
+    throw new Error(`refusing --out ${out}: it is a non-empty folder that is not a previous senior-dev build`);
   }
+}
+
+// A previous build holds only .agents/ and plugins/, and its marketplace is
+// ours: another project's Codex marketplace, or a build someone added files
+// to, is never emptied.
+function previousBuild(out) {
+  if (!readdirSync(out).every((e) => e === '.agents' || e === 'plugins')) return false;
+  try {
+    return JSON.parse(readFileSync(join(out, '.agents', 'plugins', 'marketplace.json'), 'utf8')).name === MARKETPLACE.name;
+  } catch { return false; }
 }
 
 // Split a markdown file into its leading `---` frontmatter block and the rest.

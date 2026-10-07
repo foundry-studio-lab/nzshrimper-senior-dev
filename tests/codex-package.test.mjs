@@ -103,9 +103,22 @@ test('build: ${CLAUDE_PLUGIN_ROOT} becomes <plugin>, with the note, in every ski
 
 test('build: a rebuild into the same folder removes stale files', () => {
   const out = built();
-  writeFileSync(join(out, 'stale.txt'), 'x');
+  writeFileSync(join(plug(out), 'stale.txt'), 'x');
   buildCodexPackage({ repoRoot: root, out });
-  assert.ok(!existsSync(join(out, 'stale.txt')));
+  assert.ok(!existsSync(join(plug(out), 'stale.txt')));
+});
+
+test('build: refuses another project that hosts a Codex marketplace, and a former build with extra files', () => {
+  const other = tmp('sd-cx-other-');
+  mkdirSync(join(other, '.agents', 'plugins'), { recursive: true });
+  writeFileSync(join(other, '.agents', 'plugins', 'marketplace.json'), JSON.stringify({ name: 'someone-else', plugins: [] }));
+  writeFileSync(join(other, 'src.js'), 'keep');
+  assert.throws(() => buildCodexPackage({ repoRoot: root, out: other }), /refusing/);
+  assert.equal(readFileSync(join(other, 'src.js'), 'utf8'), 'keep');
+  const out = built();
+  writeFileSync(join(out, 'notes.md'), 'mine');
+  assert.throws(() => buildCodexPackage({ repoRoot: root, out }), /refusing/);
+  assert.equal(readFileSync(join(out, 'notes.md'), 'utf8'), 'mine');
 });
 
 test('build CLI: runs from another cwd and prints the codex:// deeplink', () => {
