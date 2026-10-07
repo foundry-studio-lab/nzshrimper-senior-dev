@@ -20,7 +20,8 @@ A native package for Codex and the ChatGPT app.
   Claude manifest is absent, so a packaged guard can report itself stale.
 - Version 0.5.0 in all three manifests; a test keeps them in step.
 - Known limit: in Codex and the ChatGPT app the SessionStart bootstrap fires
-  but the commit and stop gates do not (Codex's shell tool is not `Bash`);
+  but the commit gate does not (it matches `Bash`; Codex's shell tool is
+  `exec`), and the stop gate is unverified there;
   the universal guard enforces commit/merge/push there.
 
 ## 0.4.2 — 2026-10-02

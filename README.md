@@ -99,8 +99,9 @@ before it even reaches git, the stop gate challenges premature "done", and the
 SessionStart bootstrap auto-engages the conductor. Cowork doesn't fire Claude
 Code plugin hooks (verified 2026-07). Codex and the ChatGPT app fire the
 SessionStart bootstrap (seen in a 2026-09 Codex session log) but not the commit
-or stop gates: Codex runs shell commands through a differently named tool the
-`Bash` gate never matches. With the universal guard installed, the
+gate: it matches a tool named `Bash`, and Codex runs shell commands through a
+tool named `exec`. Whether the stop gate fires there is not yet verified. With
+the universal guard installed, the
 commit/merge/push gates hold in all of them, enforced by git itself. Without
 the guard, non-Claude-Code hosts run the conductor and state tracking in
 advisory mode only.
@@ -218,11 +219,11 @@ Build the local marketplace folder from a clone of this repo, then add it:
 
 ```bash
 node scripts/build-codex-package.mjs          # writes dist/codex-marketplace
-codex plugin marketplace add dist/codex-marketplace
+codex plugin marketplace add ./dist/codex-marketplace   # the ./ matters: a bare path is read as a GitHub repo
 codex plugin add senior-dev@nzshrimper-senior-dev
 ```
 
-In the ChatGPT app, add `dist/codex-marketplace` as a local plugin marketplace
+In the ChatGPT app, add the `dist/codex-marketplace` folder as a local plugin marketplace
 (the build also prints a `codex://` link that opens it), then install
 **senior-dev**. The package carries the conductor plus one skill per command
 (`start`, `status`, `bypass`, `ship`, `finish`, `guard`, `skills`), since the
