@@ -2,7 +2,7 @@
 
 > A disciplined senior developer, with a second reviewer over its shoulder, for every Claude Code coding session.
 
-![version](https://img.shields.io/badge/version-0.4.2-6b2c8a) ![license](https://img.shields.io/badge/license-MIT-1f3a5f) ![tests](https://img.shields.io/badge/tests-394%20passing-4a6b3a) ![Claude Code](https://img.shields.io/badge/Claude%20Code-plugin-1a1814)
+![version](https://img.shields.io/badge/version-0.5.0-6b2c8a) ![license](https://img.shields.io/badge/license-MIT-1f3a5f) ![tests](https://img.shields.io/badge/tests-411%20passing-4a6b3a) ![Claude Code](https://img.shields.io/badge/Claude%20Code-plugin-1a1814)
 
 senior-dev turns an ordinary coding session into a run with rails: it classifies
 the task, insists on the right chain of installed skills, reviews the work with
@@ -96,11 +96,14 @@ down with `state-cli waiting --on "<what>"`.
 
 Claude Code is the richest host: the PreToolUse gate stops a gated action
 before it even reaches git, the stop gate challenges premature "done", and the
-SessionStart bootstrap auto-engages the conductor. Other hosts (Cowork, OpenAI
-Codex) don't fire Claude Code plugin hooks (verified 2026-07) — but with the
-universal guard installed, the commit/merge/push gates hold there too, enforced
-by git itself. Without the guard, non-Claude-Code hosts run the conductor and
-state tracking in advisory mode only.
+SessionStart bootstrap auto-engages the conductor. Cowork doesn't fire Claude
+Code plugin hooks (verified 2026-07). Codex and the ChatGPT app fire the
+SessionStart bootstrap (seen in a 2026-09 Codex session log) but not the commit
+or stop gates: Codex runs shell commands through a differently named tool the
+`Bash` gate never matches. With the universal guard installed, the
+commit/merge/push gates hold in all of them, enforced by git itself. Without
+the guard, non-Claude-Code hosts run the conductor and state tracking in
+advisory mode only.
 
 ## Choosing a skill source
 
@@ -209,9 +212,32 @@ Or without the terminal: in Claude Code, run `/plugin`, add the marketplace
 `nzshrimper/nzshrimper-senior-dev`, then find **senior-dev** under Discover and
 click Install. Restart Claude Code to load the hooks either way.
 
-<sub>Maintainer update flow: edit source, bump both versions in
-`.claude-plugin/`, then `claude plugin marketplace update nzshrimper-senior-dev`
-and `claude plugin update senior-dev@nzshrimper-senior-dev`, restart.</sub>
+### Install in Codex or the ChatGPT app
+
+Build the local marketplace folder from a clone of this repo, then add it:
+
+```bash
+node scripts/build-codex-package.mjs          # writes dist/codex-marketplace
+codex plugin marketplace add dist/codex-marketplace
+codex plugin add senior-dev@nzshrimper-senior-dev
+```
+
+In the ChatGPT app, add `dist/codex-marketplace` as a local plugin marketplace
+(the build also prints a `codex://` link that opens it), then install
+**senior-dev**. The package carries the conductor plus one skill per command
+(`start`, `status`, `bypass`, `ship`, `finish`, `guard`, `skills`), since the
+Codex format has no slash commands. Install the universal guard in each repo:
+it is what enforces the gates there (see "Where the gates hold"). The package
+is a copy: after an update, rebuild and reinstall. The build only ever writes
+outside the repo or under its `dist/`, and only empties a folder that is its
+own previous build.
+
+<sub>Maintainer update flow: edit source, bump the version in
+`.claude-plugin/plugin.json`, both fields of `.claude-plugin/marketplace.json`
+and `.codex-plugin/plugin.json` (a test checks they agree), then
+`claude plugin marketplace update nzshrimper-senior-dev` and
+`claude plugin update senior-dev@nzshrimper-senior-dev`, restart; for Codex,
+rebuild and reinstall the package.</sub>
 
 ## Commands
 
