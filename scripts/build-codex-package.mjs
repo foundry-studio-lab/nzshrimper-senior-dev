@@ -3,12 +3,11 @@
 // senior-dev from: <out>/.agents/plugins/marketplace.json plus a copy of the
 // runtime files in <out>/plugins/senior-dev. The Codex plugin format has no
 // slash commands, so each commands/*.md becomes a skill. Zero dependencies.
-import { cpSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync, existsSync } from 'node:fs';
-import { dirname, join, resolve, sep } from 'node:path';
+import { cpSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import { basename, dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const RUNTIME = ['.codex-plugin', 'skills', 'scripts', 'hooks', 'LICENSE', 'README.md', 'PRIVACY.md', 'CHANGELOG.md'];
-const SOURCES = ['skills', 'scripts', 'hooks', 'commands', '.codex-plugin'];
 const ROOT_VAR = '${CLAUDE_PLUGIN_ROOT}';
 const NOTE = "`<plugin>` is this plugin's folder; the senior-dev session-start banner prints the state CLI's exact path.";
 const ARGS_NOTE = 'Arguments: `$ARGUMENTS` means the text the user gave with this request.';
@@ -25,12 +24,30 @@ const MARKETPLACE = {
 
 const inside = (child, parent) => child === parent || child.startsWith(parent + sep);
 
-// The build deletes its output first, so refuse anything that would take
-// the repo or a source folder with it.
+// The on-disk spelling of a path, even one that does not exist yet: the
+// nearest existing ancestor through realpath (resolves symlinks such as
+// /tmp -> /private/tmp, and the true case on a case-insensitive volume),
+// then the missing tail as given.
+function canonical(p) {
+  let head = resolve(p);
+  const tail = [];
+  while (!existsSync(head)) {
+    tail.unshift(basename(head));
+    head = dirname(head);
+  }
+  return join(realpathSync.native(head), ...tail);
+}
+
+// The build deletes its output first, so it only ever writes to a folder
+// outside the repository or under the repository's dist/, and never empties
+// a non-empty folder that is not a previous build.
 function checkOut(repoRoot, out) {
   if (inside(repoRoot, out)) throw new Error(`refusing --out ${out}: it contains the repository`);
-  for (const s of SOURCES) {
-    if (inside(out, join(repoRoot, s))) throw new Error(`refusing --out ${out}: it is inside the source folder ${s}/`);
+  if (inside(out, repoRoot) && !inside(out, join(repoRoot, 'dist')) || out === join(repoRoot, 'dist')) {
+    throw new Error(`refusing --out ${out}: inside the repository only dist/<folder> may be written`);
+  }
+  if (existsSync(out) && readdirSync(out).length && !existsSync(join(out, '.agents', 'plugins', 'marketplace.json'))) {
+    throw new Error(`refusing --out ${out}: it is a non-empty folder that is not a previous build`);
   }
 }
 
@@ -40,8 +57,10 @@ function splitFront(text) {
   return m ? { front: m[1], body: text.slice(m[0].length) } : { front: '', body: text };
 }
 
-// Codex does not substitute Claude Code's plugin-root variable in skill text.
+// Codex does not substitute Claude Code's plugin-root variable in skill text,
+// nor run Claude Code's !`command` lines: those become instructions to run it.
 function rewriteRoot(body) {
+  body = body.replace(/^!`(.+)`[ \t]*$/gm, 'Run this command and use its output: `$1`');
   return body.includes(ROOT_VAR) ? `${NOTE}\n\n${body.replaceAll(ROOT_VAR, '<plugin>')}` : body;
 }
 
@@ -58,8 +77,8 @@ function commandSkill(file, name) {
 }
 
 export function buildCodexPackage({ repoRoot, out }) {
-  repoRoot = resolve(repoRoot);
-  out = resolve(out);
+  repoRoot = canonical(repoRoot);
+  out = canonical(out);
   checkOut(repoRoot, out);
   rmSync(out, { recursive: true, force: true });
   const plugin = join(out, 'plugins', 'senior-dev');

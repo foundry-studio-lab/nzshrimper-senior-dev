@@ -1,9 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, cpSync, readdirSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, cpSync, readdirSync, existsSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { join, dirname } from 'node:path';
+import { join, dirname, basename } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { buildCodexPackage } from '../scripts/build-codex-package.mjs';
 
@@ -82,7 +82,8 @@ test('build: each command becomes a skill with valid frontmatter', () => {
     assert.equal(f.name, name);
     assert.equal(f.description, `senior-dev: ${desc}`);
     assert.ok(f.description.length <= 1024);
-    const body = cmd.split('\n---\n').slice(1).join('\n---\n').replaceAll('${CLAUDE_PLUGIN_ROOT}', '<plugin>');
+    const body = cmd.split('\n---\n').slice(1).join('\n---\n').replaceAll('${CLAUDE_PLUGIN_ROOT}', '<plugin>')
+      .replace(/^!`(.+)`[ \t]*$/gm, 'Run this command and use its output: `$1`');
     assert.ok(text.includes(body.trim()), `${name}: command body carried over`);
   }
 });
@@ -111,17 +112,65 @@ test('build CLI: runs from another cwd and prints the codex:// deeplink', () => 
   const out = join(tmp('sd-cx-cli-'), 'mkt');
   const r = spawnSync('node', [BUILD, '--out', out], { cwd: tmpdir(), encoding: 'utf8' });
   assert.equal(r.status, 0, r.stderr);
-  assert.ok(r.stdout.includes(`codex://plugins/senior-dev?marketplacePath=${encodeURIComponent(join(out, '.agents', 'plugins', 'marketplace.json'))}`), r.stdout);
+  const real = join(realpathSync(dirname(out)), 'mkt', '.agents', 'plugins', 'marketplace.json');
+  assert.ok(r.stdout.includes(`codex://plugins/senior-dev?marketplacePath=${encodeURIComponent(real)}`), r.stdout);
 });
 
-test('build CLI: refuses an out dir that would delete the repo or a source folder', () => {
-  for (const bad of [root, dirname(root), join(root, 'skills', 'x'), join(root, 'scripts')]) {
-    const before = walk(join(root, 'skills')).length;
-    const r = spawnSync('node', [BUILD, '--out', bad], { encoding: 'utf8' });
-    assert.equal(r.status, 1, bad);
-    assert.equal(walk(join(root, 'skills')).length, before);
+// Safety cases run against a scratch copy only: a broken guard must never be able to delete this repo.
+test('build: refuses any out dir in the repo except dist/, or above it, and leaves everything in place', () => {
+  const f = fixture();
+  for (const d of ['docs', '.git', '.claude-plugin', 'tests']) mkdirSync(join(f, d), { recursive: true });
+  writeFileSync(join(f, 'docs', 'keep.md'), 'x');
+  const count = () => walk(f).length;
+  const before = count();
+  for (const bad of [f, dirname(f), join(f, 'skills', 'x'), join(f, 'scripts'), join(f, 'docs'), join(f, '.git'), join(f, '.claude-plugin'), join(f, 'tests'), join(f, 'README.md'), join(f, 'new-folder')]) {
+    assert.throws(() => buildCodexPackage({ repoRoot: f, out: bad }), /refusing/, bad);
   }
-  assert.ok(existsSync(join(root, 'scripts', 'build-codex-package.mjs')));
+  assert.equal(count(), before);
+  buildCodexPackage({ repoRoot: f, out: join(f, 'dist', 'codex-marketplace') });
+  assert.ok(existsSync(join(f, 'docs', 'keep.md')));
+});
+
+test('build: a case-variant or /tmp-alias spelling of the repo is still refused', () => {
+  const f = fixture();
+  const before = walk(f).length;
+  const upper = join(dirname(f), basename(f).toUpperCase());
+  if (existsSync(upper)) assert.throws(() => buildCodexPackage({ repoRoot: f, out: upper }), /refusing/); // case-insensitive volume
+  const real = realpathSync(f);
+  const alias = real.startsWith('/private/') ? real.slice('/private'.length) : null;
+  if (alias && existsSync(alias)) {
+    assert.throws(() => buildCodexPackage({ repoRoot: f, out: real }), /refusing/);
+    assert.throws(() => buildCodexPackage({ repoRoot: real, out: alias }), /refusing/);
+    assert.throws(() => buildCodexPackage({ repoRoot: real, out: join(alias, 'skills') }), /refusing/);
+  }
+  assert.equal(walk(f).length, before);
+});
+
+test('build CLI: refuses a non-empty folder that is not a previous build, and keeps its files', () => {
+  const user = tmp('sd-cx-user-');
+  writeFileSync(join(user, 'thesis.docx'), 'precious');
+  const r = spawnSync('node', [BUILD, '--out', user], { encoding: 'utf8' });
+  assert.equal(r.status, 1, r.stdout);
+  assert.match(r.stderr, /refusing/);
+  assert.equal(readFileSync(join(user, 'thesis.docx'), 'utf8'), 'precious');
+});
+
+test('build: no skill keeps a Claude-only !`command` line; it becomes an instruction to run it', () => {
+  const p = plug(built());
+  for (const name of readdirSync(join(p, 'skills'))) {
+    const text = readFileSync(join(p, 'skills', name, 'SKILL.md'), 'utf8');
+    assert.ok(!/^!`/m.test(text), name);
+  }
+  assert.match(readFileSync(join(p, 'skills', 'status', 'SKILL.md'), 'utf8'), /Run this command and use its output: `node "<plugin>\/scripts\/state-cli\.mjs" status`/);
+});
+
+test('the packaged guard stamps the real version (the package has no .claude-plugin)', () => {
+  const p = plug(built());
+  const repo = tmp('sd-cx-guard-');
+  spawnSync('git', ['init', '-q'], { cwd: repo });
+  const r = spawnSync('node', [join(p, 'scripts', 'state-cli.mjs'), 'guard', 'install'], { cwd: repo, encoding: 'utf8', env: { ...process.env, SENIOR_DEV_OFFLINE: '1' } });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(readFileSync(join(repo, '.senior-dev', 'guard', 'version'), 'utf8').trim(), '0.5.0');
 });
 
 test('build: a command without a description fails, naming the file', () => {

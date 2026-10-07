@@ -62,11 +62,16 @@ function requireValues(cmdName, flags, keys) {
 const GUARD_HOOKS = ['pre-commit', 'pre-push', 'pre-merge-commit'];
 const SHIM_MARK = '# senior-dev guard shim';
 
+// The Claude Code install carries .claude-plugin/, the Codex package only .codex-plugin/.
 function pluginVersion() {
-  try {
-    const p = join(dirname(fileURLToPath(import.meta.url)), '..', '.claude-plugin', 'plugin.json');
-    return JSON.parse(readFileSync(p, 'utf8')).version || 'unknown';
-  } catch { return 'unknown'; }
+  for (const m of ['.claude-plugin', '.codex-plugin']) {
+    try {
+      const p = join(dirname(fileURLToPath(import.meta.url)), '..', m, 'plugin.json');
+      const v = JSON.parse(readFileSync(p, 'utf8')).version;
+      if (v) return v;
+    } catch { /* try the next manifest */ }
+  }
+  return 'unknown';
 }
 
 // Resolves the hooks directory via git itself rather than re-implementing
