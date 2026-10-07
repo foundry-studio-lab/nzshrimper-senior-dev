@@ -119,6 +119,14 @@ test('build: refuses another project that hosts a Codex marketplace, and a forme
   writeFileSync(join(out, 'notes.md'), 'mine');
   assert.throws(() => buildCodexPackage({ repoRoot: root, out }), /refusing/);
   assert.equal(readFileSync(join(out, 'notes.md'), 'utf8'), 'mine');
+  // Extra content inside .agents/ or plugins/ is not ours either.
+  for (const extra of [['.agents', 'skills', 'custom', 'SKILL.md'], ['.agents', 'plugins', 'other.json'], ['plugins', 'another-plugin', 'x.md']]) {
+    const o = built();
+    mkdirSync(join(o, ...extra.slice(0, -1)), { recursive: true });
+    writeFileSync(join(o, ...extra), 'mine');
+    assert.throws(() => buildCodexPackage({ repoRoot: root, out: o }), /refusing/, extra.join('/'));
+    assert.equal(readFileSync(join(o, ...extra), 'utf8'), 'mine');
+  }
 });
 
 test('build CLI: runs from another cwd and prints the codex:// deeplink', () => {

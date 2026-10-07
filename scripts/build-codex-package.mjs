@@ -55,7 +55,9 @@ function checkOut(repoRoot, out) {
 // ours: another project's Codex marketplace, or a build someone added files
 // to, is never emptied.
 function previousBuild(out) {
-  if (!readdirSync(out).every((e) => e === '.agents' || e === 'plugins')) return false;
+  const only = (dir, allowed) => !existsSync(join(out, dir)) || readdirSync(join(out, dir)).every((e) => allowed.includes(e));
+  if (!only('', ['.agents', 'plugins']) || !only('.agents', ['plugins'])
+    || !only(join('.agents', 'plugins'), ['marketplace.json']) || !only('plugins', ['senior-dev'])) return false;
   try {
     return JSON.parse(readFileSync(join(out, '.agents', 'plugins', 'marketplace.json'), 'utf8')).name === MARKETPLACE.name;
   } catch { return false; }
