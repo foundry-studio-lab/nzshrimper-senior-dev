@@ -48,6 +48,29 @@ process.exit(Number(readFileSync(ex, 'utf8')));
   return { dir, aux, fx, setReport, setExit, markers };
 }
 
+// node's JUnit reporter will not create the folder for its destination file,
+// so a report path whose folder is missing (a fresh worktree) used to crash.
+test('the runner creates the report folder first, for the full run and for the base-worktree proof', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'sd-tr-dir-'));
+  g(dir, 'init', '-q');
+  g(dir, 'config', 'user.email', 't@t'); g(dir, 'config', 'user.name', 't');
+  writeFileSync(join(dir, '.gitignore'), 'reports/\n');
+  writeFileSync(join(dir, 't.test.mjs'), "import { test } from 'node:test';\nimport assert from 'node:assert';\ntest('ok', () => {});\ntest('legacy', () => { assert.equal(1, 2); });\n");
+  g(dir, 'add', '-A'); g(dir, 'commit', '-qm', 'init');
+  const J = '--test-reporter=junit --test-reporter-destination=reports/out/junit.xml';
+  // `{file}` is the id's prefix before " > " (vitest ids); node's ids start
+  // with "test", so `one` names the file itself, as SMOKE 28 does.
+  writeSkillsConfig(dir, { version: 4, source: 'superpowers', shared: false, tests: { full: `node --test ${J} t.test.mjs`, one: `node --test ${J} t.test.mjs`, report: 'reports/out/junit.xml' } });
+  assert.equal(cli(dir, ['init', '--task', 't', '--type', 'bug-fix']).status, 0);
+  assert.ok(!existsSync(join(dir, 'reports')));
+  cli(dir, ['test', '--full']);
+  const F = readState(dir).testRuns.at(-1);
+  assert.equal(F.passedCount, 1, 'the report was written and parsed');
+  assert.equal(F.failures.length, 1);
+  const r = cli(dir, ['test', '--preexisting', F.failures[0]]);
+  assert.match(r.out, /: PROVEN/, r.out);
+});
+
 test('shq round-trips hostile names', () => {
   const dir = mkdtempSync(join(tmpdir(), 'sd-shq-'));
   const s = "a b'$(touch x)";

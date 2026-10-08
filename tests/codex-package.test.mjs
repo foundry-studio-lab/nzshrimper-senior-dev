@@ -50,11 +50,11 @@ test('codex manifest carries the spec fields', () => {
   assert.ok(m.interface.defaultPrompt.every((p) => p.length < 128));
 });
 
-test('all three manifests agree on 0.5.1', () => {
+test('all three manifests agree on 0.5.2', () => {
   const c = JSON.parse(read('.claude-plugin/plugin.json'));
   const k = JSON.parse(read('.claude-plugin/marketplace.json'));
   const x = JSON.parse(read('.codex-plugin/plugin.json'));
-  assert.deepEqual([c.version, k.metadata.version, k.plugins[0].version, x.version], ['0.5.1', '0.5.1', '0.5.1', '0.5.1']);
+  assert.deepEqual([c.version, k.metadata.version, k.plugins[0].version, x.version], ['0.5.2', '0.5.2', '0.5.2', '0.5.2']);
 });
 
 test('build: marketplace file is exactly the spec entry', () => {
