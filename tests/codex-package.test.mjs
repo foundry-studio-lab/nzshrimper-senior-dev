@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, cpSync, readdirSync, existsSync, realpathSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, cpSync, readdirSync, existsSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { join, dirname, basename } from 'node:path';
@@ -50,11 +50,11 @@ test('codex manifest carries the spec fields', () => {
   assert.ok(m.interface.defaultPrompt.every((p) => p.length < 128));
 });
 
-test('all three manifests agree on 0.5.0', () => {
+test('all three manifests agree on 0.5.1', () => {
   const c = JSON.parse(read('.claude-plugin/plugin.json'));
   const k = JSON.parse(read('.claude-plugin/marketplace.json'));
   const x = JSON.parse(read('.codex-plugin/plugin.json'));
-  assert.deepEqual([c.version, k.metadata.version, k.plugins[0].version, x.version], ['0.5.0', '0.5.0', '0.5.0', '0.5.0']);
+  assert.deepEqual([c.version, k.metadata.version, k.plugins[0].version, x.version], ['0.5.1', '0.5.1', '0.5.1', '0.5.1']);
 });
 
 test('build: marketplace file is exactly the spec entry', () => {
@@ -191,7 +191,7 @@ test('the packaged guard stamps the real version (the package has no .claude-plu
   spawnSync('git', ['init', '-q'], { cwd: repo });
   const r = spawnSync('node', [join(p, 'scripts', 'state-cli.mjs'), 'guard', 'install'], { cwd: repo, encoding: 'utf8', env: { ...process.env, SENIOR_DEV_OFFLINE: '1' } });
   assert.equal(r.status, 0, r.stderr);
-  assert.equal(readFileSync(join(repo, '.senior-dev', 'guard', 'version'), 'utf8').trim(), '0.5.0');
+  assert.equal(readFileSync(join(repo, '.senior-dev', 'guard', 'version'), 'utf8').trim(), JSON.parse(read('.codex-plugin/plugin.json')).version);
 });
 
 test('build: a command without a description fails, naming the file', () => {
@@ -215,4 +215,65 @@ test('build: .DS_Store files are never copied', () => {
   const out = join(f, 'dist', 'm');
   buildCodexPackage({ repoRoot: f, out });
   assert.ok(!walk(out).some((x) => x.endsWith('.DS_Store')));
+});
+
+test('build CLI: --out needs a value, --out=<dir> works, unknown arguments fail', () => {
+  const run = (...a) => spawnSync('node', [BUILD, ...a], { cwd: tmpdir(), encoding: 'utf8' });
+  let r = run('--out');
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /--out needs a folder/);
+  r = run('--out', '--bogus');
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /--out needs a folder/);
+  r = run('--bogus');
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /unknown argument --bogus/);
+  const out = join(tmp('sd-cx-eq-'), 'mkt');
+  r = run(`--out=${out}`);
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(existsSync(join(out, '.agents', 'plugins', 'marketplace.json')));
+});
+
+test('build: CRLF command files and multi-line (folded or literal) descriptions are read correctly', () => {
+  const f = fixture();
+  writeFileSync(join(f, 'commands', 'status.md'), '---\r\ndescription: Show the state\r\nargument-hint: x\r\n---\r\nbody line\r\n');
+  writeFileSync(join(f, 'commands', 'finish.md'), '---\ndescription: >\n  Close the\n  session cleanly\nargument-hint: x\n---\nbody\n');
+  writeFileSync(join(f, 'commands', 'guard.md'), '---\ndescription: |-\n  Manage the\n  git hooks\n---\nbody\n');
+  const out = join(f, 'dist', 'm');
+  buildCodexPackage({ repoRoot: f, out });
+  const desc = (n) => front(readFileSync(join(plug(out), 'skills', n, 'SKILL.md'), 'utf8')).description;
+  assert.equal(desc('status'), 'senior-dev: Show the state');
+  assert.equal(desc('finish'), 'senior-dev: Close the session cleanly');
+  assert.equal(desc('guard'), 'senior-dev: Manage the git hooks');
+  assert.ok(readFileSync(join(plug(out), 'skills', 'status', 'SKILL.md'), 'utf8').includes('body line'));
+});
+
+test('build: a block-scalar description keeps its lines after a blank line', () => {
+  const f = fixture();
+  writeFileSync(join(f, 'commands', 'status.md'), '---\ndescription: >\n  one\n\n  two\nargument-hint: x\n---\nbody\n');
+  writeFileSync(join(f, 'commands', 'finish.md'), '---\ndescription: |\n\n  after a leading blank\n---\nbody\n');
+  const out = join(f, 'dist', 'm');
+  buildCodexPackage({ repoRoot: f, out });
+  const desc = (n) => front(readFileSync(join(plug(out), 'skills', n, 'SKILL.md'), 'utf8')).description;
+  assert.equal(desc('status'), 'senior-dev: one two');
+  assert.equal(desc('finish'), 'senior-dev: after a leading blank');
+});
+
+test('build: a command named like an existing skill fails before touching the previous build', () => {
+  const f = fixture();
+  const out = join(f, 'dist', 'm');
+  buildCodexPackage({ repoRoot: f, out });
+  writeFileSync(join(f, 'commands', 'conductor.md'), '---\ndescription: x\n---\nbody\n');
+  assert.throws(() => buildCodexPackage({ repoRoot: f, out }), /conductor/);
+  assert.ok(existsSync(join(out, '.agents', 'plugins', 'marketplace.json')), 'previous build left intact');
+  assert.ok(existsSync(join(plug(out), 'skills', 'status', 'SKILL.md')));
+  rmSync(join(f, 'commands', 'conductor.md'));
+  writeFileSync(join(f, 'commands', 'Conductor.md'), '---\ndescription: x\n---\nbody\n'); // case variant
+  assert.throws(() => buildCodexPackage({ repoRoot: f, out }), /Conductor/);
+  assert.ok(existsSync(join(out, '.agents', 'plugins', 'marketplace.json')), 'previous build left intact');
+});
+
+test('the skills command says what to present without relying on rendered output above it', () => {
+  assert.ok(!read('commands/skills.md').includes('tables above'));
+  assert.match(read('commands/skills.md'), /Present both tables \(the output of the two commands\)/);
 });

@@ -8,7 +8,7 @@ allowed-tools: Bash(node:*)
 
 !`node "${CLAUDE_PLUGIN_ROOT}/scripts/state-cli.mjs" skills-config models --lane $ARGUMENTS`
 
-Present both tables above to the operator verbatim. Then offer the
+Present both tables (the output of the two commands) to the operator verbatim. Then offer the
 per-phase picker from the `senior-dev:conductor` skill ("Skill source
 resolution" section): for any phase they want to change, collect their pick
 and record it with
