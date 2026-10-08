@@ -109,10 +109,11 @@ export function buildCodexPackage({ repoRoot, out }) {
   repoRoot = canonical(repoRoot);
   out = canonical(out);
   checkOut(repoRoot, out);
-  // A command named like a skill would overwrite it: fail before deleting anything.
-  const skillNames = new Set(readdirSync(join(repoRoot, 'skills')));
+  // A command named like a skill would overwrite it: fail before deleting
+  // anything. Compared case-insensitively, as macOS and Windows volumes are.
+  const skillNames = new Set(readdirSync(join(repoRoot, 'skills')).map((s) => s.toLowerCase()));
   for (const f of readdirSync(join(repoRoot, 'commands')).filter((f) => f.endsWith('.md'))) {
-    if (skillNames.has(f.slice(0, -3))) throw new Error(`commands/${f} has the same name as the skill skills/${f.slice(0, -3)}/: rename one of them`);
+    if (skillNames.has(f.slice(0, -3).toLowerCase())) throw new Error(`commands/${f} has the same name as a skill in skills/: rename one of them`);
   }
   rmSync(out, { recursive: true, force: true });
   const plugin = join(out, 'plugins', 'senior-dev');

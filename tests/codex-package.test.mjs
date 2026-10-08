@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, cpSync, readdirSync, existsSync, realpathSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, cpSync, readdirSync, existsSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { join, dirname, basename } from 'node:path';
@@ -267,6 +267,10 @@ test('build: a command named like an existing skill fails before touching the pr
   assert.throws(() => buildCodexPackage({ repoRoot: f, out }), /conductor/);
   assert.ok(existsSync(join(out, '.agents', 'plugins', 'marketplace.json')), 'previous build left intact');
   assert.ok(existsSync(join(plug(out), 'skills', 'status', 'SKILL.md')));
+  rmSync(join(f, 'commands', 'conductor.md'));
+  writeFileSync(join(f, 'commands', 'Conductor.md'), '---\ndescription: x\n---\nbody\n'); // case variant
+  assert.throws(() => buildCodexPackage({ repoRoot: f, out }), /Conductor/);
+  assert.ok(existsSync(join(out, '.agents', 'plugins', 'marketplace.json')), 'previous build left intact');
 });
 
 test('the skills command says what to present without relying on rendered output above it', () => {
