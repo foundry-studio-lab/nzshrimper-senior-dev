@@ -1,0 +1,31 @@
+{
+  "name": "senior-dev",
+  "version": "0.5.0",
+  "description": "Orchestrates a senior-dev coding session: classifies the task, enforces the right installed-skill chain (superpowers, codex, installed review skills), gates commits and session-close on review + verification + documentation, and finishes with a zero-leftovers hygiene sweep.",
+  "author": {
+    "name": "Foundry Studio",
+    "email": "nzshrimper@gmail.com",
+    "url": "https://foundrystudio.app"
+  },
+  "homepage": "https://github.com/foundry-studio-lab/nzshrimper-senior-dev",
+  "repository": "https://github.com/foundry-studio-lab/nzshrimper-senior-dev",
+  "license": "MIT",
+  "keywords": ["code-review", "workflow", "tdd", "git", "developer-tools"],
+  "skills": "./skills/",
+  "hooks": "./hooks/hooks.json",
+  "interface": {
+    "displayName": "senior-dev",
+    "shortDescription": "A disciplined senior developer for every coding session",
+    "longDescription": "senior-dev runs each coding task the way a careful senior developer would: it classifies the task, routes it through the right chain of skills (design, plan, test-driven build, review), gates the work on a two-reviewer review, verification and up-to-date documentation, and closes with a hygiene sweep that leaves no stray branches, worktrees or files. Its optional git-hook guard enforces the commit and push gates in any app.",
+    "developerName": "Foundry Studio",
+    "category": "Developer Tools",
+    "capabilities": ["Interactive", "Write"],
+    "websiteURL": "https://foundrystudio.app",
+    "privacyPolicyURL": "https://github.com/foundry-studio-lab/nzshrimper-senior-dev/blob/main/PRIVACY.md",
+    "defaultPrompt": [
+      "Start a senior-dev session for this task",
+      "Show the senior-dev session status",
+      "Finish and close this senior-dev session"
+    ]
+  }
+}

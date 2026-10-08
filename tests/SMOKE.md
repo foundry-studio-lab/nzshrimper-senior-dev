@@ -114,3 +114,13 @@ Setup: `mkdir -p <scratch>/sd-smoke && cd <scratch>/sd-smoke && git init && git 
         NEEDS_REVISION naming the bug, 11 s. Codex lane (effort low): exit 0,
         NEEDS_REVISION, 25 s. `git status` and HEAD unchanged for both. The
         runner also ran this branch's own Codex reviews live (cycles 1-4).
+30. [x] Codex package installs into a THROWAWAY Codex home: build
+        `dist/codex-marketplace`, `CODEX_HOME=<temp> codex plugin marketplace
+        add <dist>` and `codex plugin add senior-dev@nzshrimper-senior-dev`.
+        PASSED 7/7 on 2026-10-08 (codex-cli 0.160.0): listed `installed,
+        enabled 0.5.0`, the cache holds the eight skills and the Codex
+        manifest, temp home removed, real `~/.codex/config.toml`
+        byte-identical.
+31. [ ] ChatGPT app (operator): add `dist/codex-marketplace` as a local
+        marketplace, install senior-dev, confirm the card shows and a skill
+        (e.g. "Show the senior-dev session status") runs.

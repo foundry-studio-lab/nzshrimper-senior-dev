@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.5.0 — 2026-10-08
+
+A native package for Codex and the ChatGPT app.
+
+- `.codex-plugin/plugin.json`: the Codex manifest, with the app's card
+  (display name, descriptions, Developer Tools category, three starter
+  prompts, website and privacy links).
+- `scripts/build-codex-package.mjs` writes `dist/codex-marketplace/`: an
+  `.agents/plugins/marketplace.json` and a copy of the runtime files in
+  `plugins/senior-dev/`. The seven slash commands become skills (the Codex
+  format has none); `${CLAUDE_PLUGIN_ROOT}` in skill text becomes `<plugin>`
+  with a note, and Claude Code's `` !`cmd` `` lines become instructions to run
+  the command. The build deletes its output first, so it only writes outside
+  the repo or under its `dist/`, compares real paths (symlinks, case), and
+  only empties a folder that is its own previous build (our marketplace name,
+  nothing else inside).
+- The guard's version stamp reads `.codex-plugin/plugin.json` when the
+  Claude manifest is absent, so a packaged guard can report itself stale.
+- Version 0.5.0 in all three manifests; a test keeps them in step.
+- Known limit: in Codex and the ChatGPT app the SessionStart bootstrap fires
+  but the commit gate does not (it matches `Bash`; Codex's shell tool is
+  `exec`), and the stop gate is unverified there;
+  the universal guard enforces commit/merge/push there.
+
 ## 0.4.2 — 2026-10-02
 
 Hardening pass on the 0.4 test runner, plus a runner for reviews.
