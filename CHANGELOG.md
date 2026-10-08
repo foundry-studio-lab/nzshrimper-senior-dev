@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.5.1 — 2026-10-08
+
+Tidy-up of the Codex package build, from the 0.5.0 review's deferred list.
+
+- `build-codex-package.mjs`: `--out` with no value (or followed by another
+  flag) now fails instead of quietly building to the default folder;
+  `--out=<dir>` works; unknown arguments fail.
+- Command files with CRLF line endings, and multi-line YAML descriptions
+  (`>`, `|`, with chomping signs and blank lines), are read correctly.
+- A command named like an existing skill stops the build before anything is
+  deleted, so the previous build stays intact.
+- `/senior-dev:skills` asks for "both tables (the output of the two
+  commands)", which reads right in Claude Code and in the Codex package.
+
 ## 0.5.0 — 2026-10-08
 
 A native package for Codex and the ChatGPT app.
