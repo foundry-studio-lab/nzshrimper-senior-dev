@@ -76,10 +76,26 @@ function rewriteRoot(body) {
   return body.includes(ROOT_VAR) ? `${NOTE}\n\n${body.replaceAll(ROOT_VAR, '<plugin>')}` : body;
 }
 
+// The frontmatter `description`: a plain or quoted one-liner, or a YAML block
+// scalar (`>`, `|`, with an optional chomping sign) whose indented lines are
+// joined with spaces, since a skill description is a single line.
+function readDescription(front) {
+  const lines = front.split('\n');
+  const i = lines.findIndex((l) => /^description:/.test(l));
+  if (i < 0) return '';
+  const value = lines[i].slice('description:'.length).trim();
+  if (!/^[>|][+-]?$/.test(value)) return value.replace(/^(['"])(.*)\1$/, '$2');
+  const block = [];
+  for (const l of lines.slice(i + 1)) {
+    if (!/^[ \t]/.test(l)) break;
+    block.push(l.trim());
+  }
+  return block.filter(Boolean).join(' ');
+}
+
 function commandSkill(file, name) {
-  const { front, body } = splitFront(readFileSync(file, 'utf8'));
-  const line = front.split('\n').find((l) => /^description:/.test(l));
-  const raw = line && line.slice('description:'.length).trim().replace(/^(['"])(.*)\1$/, '$2');
+  const { front, body } = splitFront(readFileSync(file, 'utf8').replace(/\r\n/g, '\n'));
+  const raw = readDescription(front);
   if (!raw) throw new Error(`${file}: no description in its frontmatter`);
   const description = `senior-dev: ${raw}`;
   if (description.length > 1024) throw new Error(`${file}: description over 1024 characters`);
@@ -108,6 +124,7 @@ export function buildCodexPackage({ repoRoot, out }) {
   }
   for (const file of readdirSync(join(repoRoot, 'commands')).filter((f) => f.endsWith('.md')).sort()) {
     const name = file.slice(0, -3);
+    if (existsSync(join(plugin, 'skills', name))) throw new Error(`commands/${file} has the same name as the skill skills/${name}/: rename one of them`);
     mkdirSync(join(plugin, 'skills', name), { recursive: true });
     writeFileSync(join(plugin, 'skills', name, 'SKILL.md'), commandSkill(join(repoRoot, 'commands', file), name));
   }
@@ -119,9 +136,16 @@ export function buildCodexPackage({ repoRoot, out }) {
 
 if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
   const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
-  const i = process.argv.indexOf('--out');
-  const out = i > 0 && process.argv[i + 1] ? resolve(process.argv[i + 1]) : join(repoRoot, 'dist', 'codex-marketplace');
   try {
+    let out = join(repoRoot, 'dist', 'codex-marketplace');
+    const args = process.argv.slice(2);
+    for (let i = 0; i < args.length; i++) {
+      const a = args[i];
+      const v = a === '--out' ? args[++i] : a.startsWith('--out=') ? a.slice('--out='.length) : undefined;
+      if (a !== '--out' && !a.startsWith('--out=')) throw new Error(`unknown argument ${a} (usage: build-codex-package.mjs [--out <dir>])`);
+      if (!v || v.startsWith('--')) throw new Error('--out needs a folder (usage: --out <dir> or --out=<dir>)');
+      out = resolve(v);
+    }
     const r = buildCodexPackage({ repoRoot, out });
     console.log(`built ${r.out} (skills: ${r.skills.join(', ')})`);
     console.log(`codex://plugins/senior-dev?marketplacePath=${encodeURIComponent(r.marketplacePath)}`);
