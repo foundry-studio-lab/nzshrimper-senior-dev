@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.2 — 2026-10-08
+
+- The test runner creates the report file's folder before each run (full,
+  affected, one, and the base-worktree proof). Node's JUnit reporter will
+  not create it, so a fresh worktree or proof checkout used to crash with
+  ENOENT and record no report.
+- The runner no longer passes `NODE_TEST_CONTEXT` to test commands: when
+  `state-cli` itself ran under `node --test`, a configured `node --test`
+  command ran as a child of it and wrote no report.
+
 ## 0.5.1 — 2026-10-08
 
 Tidy-up of the Codex package build, from the 0.5.0 review's deferred list.

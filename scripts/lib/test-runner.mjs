@@ -1,8 +1,8 @@
 // `state-cli test`: run the configured commands, record every run in state.
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, copyFileSync, existsSync, rmSync, readFileSync, statSync, utimesSync, realpathSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, copyFileSync, existsSync, rmSync, readFileSync, statSync, utimesSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve, sep } from 'node:path';
+import { dirname, join, resolve, sep } from 'node:path';
 import { currentPhase, headTree, onlyProvenFailures } from './state.mjs';
 
 export { headTree };
@@ -103,10 +103,20 @@ function contradicts(oks) {
   return false;
 }
 
-// Run one shell command, parsing `report` (deleted first) when given.
+// Run one shell command, parsing `report` (deleted first) when given. The
+// report's folder is created first: some reporters (node's JUnit) will not,
+// and a fresh worktree or proof checkout does not have it.
 function exec(cmd, cwd, report, env) {
-  if (report) rmSync(report, { force: true });
-  const r = spawnSync('sh', ['-c', cmd], { cwd, stdio: 'inherit', env: { ...process.env, ...env } });
+  if (report) {
+    rmSync(report, { force: true });
+    mkdirSync(dirname(report), { recursive: true });
+  }
+  // NODE_TEST_CONTEXT (set when state-cli itself runs under `node --test`)
+  // would turn a configured `node --test` command into a child that reports
+  // to a parent instead of to its reporters, so no report file is written.
+  const childEnv = { ...process.env, ...env };
+  delete childEnv.NODE_TEST_CONTEXT;
+  const r = spawnSync('sh', ['-c', cmd], { cwd, stdio: 'inherit', env: childEnv });
   let parsed = null;
   if (report) {
     try { parsed = parseJUnit(readFileSync(report, 'utf8')); } catch { parsed = null; }
