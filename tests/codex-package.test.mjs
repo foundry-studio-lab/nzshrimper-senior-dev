@@ -248,10 +248,25 @@ test('build: CRLF command files and multi-line (folded or literal) descriptions 
   assert.ok(readFileSync(join(plug(out), 'skills', 'status', 'SKILL.md'), 'utf8').includes('body line'));
 });
 
-test('build: a command named like an existing skill fails instead of overwriting it', () => {
+test('build: a block-scalar description keeps its lines after a blank line', () => {
   const f = fixture();
+  writeFileSync(join(f, 'commands', 'status.md'), '---\ndescription: >\n  one\n\n  two\nargument-hint: x\n---\nbody\n');
+  writeFileSync(join(f, 'commands', 'finish.md'), '---\ndescription: |\n\n  after a leading blank\n---\nbody\n');
+  const out = join(f, 'dist', 'm');
+  buildCodexPackage({ repoRoot: f, out });
+  const desc = (n) => front(readFileSync(join(plug(out), 'skills', n, 'SKILL.md'), 'utf8')).description;
+  assert.equal(desc('status'), 'senior-dev: one two');
+  assert.equal(desc('finish'), 'senior-dev: after a leading blank');
+});
+
+test('build: a command named like an existing skill fails before touching the previous build', () => {
+  const f = fixture();
+  const out = join(f, 'dist', 'm');
+  buildCodexPackage({ repoRoot: f, out });
   writeFileSync(join(f, 'commands', 'conductor.md'), '---\ndescription: x\n---\nbody\n');
-  assert.throws(() => buildCodexPackage({ repoRoot: f, out: join(f, 'dist', 'm') }), /conductor/);
+  assert.throws(() => buildCodexPackage({ repoRoot: f, out }), /conductor/);
+  assert.ok(existsSync(join(out, '.agents', 'plugins', 'marketplace.json')), 'previous build left intact');
+  assert.ok(existsSync(join(plug(out), 'skills', 'status', 'SKILL.md')));
 });
 
 test('the skills command says what to present without relying on rendered output above it', () => {

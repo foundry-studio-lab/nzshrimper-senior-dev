@@ -87,6 +87,7 @@ function readDescription(front) {
   if (!/^[>|][+-]?$/.test(value)) return value.replace(/^(['"])(.*)\1$/, '$2');
   const block = [];
   for (const l of lines.slice(i + 1)) {
+    if (/^\s*$/.test(l)) continue; // blank lines belong to the block
     if (!/^[ \t]/.test(l)) break;
     block.push(l.trim());
   }
@@ -108,6 +109,11 @@ export function buildCodexPackage({ repoRoot, out }) {
   repoRoot = canonical(repoRoot);
   out = canonical(out);
   checkOut(repoRoot, out);
+  // A command named like a skill would overwrite it: fail before deleting anything.
+  const skillNames = new Set(readdirSync(join(repoRoot, 'skills')));
+  for (const f of readdirSync(join(repoRoot, 'commands')).filter((f) => f.endsWith('.md'))) {
+    if (skillNames.has(f.slice(0, -3))) throw new Error(`commands/${f} has the same name as the skill skills/${f.slice(0, -3)}/: rename one of them`);
+  }
   rmSync(out, { recursive: true, force: true });
   const plugin = join(out, 'plugins', 'senior-dev');
   mkdirSync(plugin, { recursive: true });
@@ -124,7 +130,6 @@ export function buildCodexPackage({ repoRoot, out }) {
   }
   for (const file of readdirSync(join(repoRoot, 'commands')).filter((f) => f.endsWith('.md')).sort()) {
     const name = file.slice(0, -3);
-    if (existsSync(join(plugin, 'skills', name))) throw new Error(`commands/${file} has the same name as the skill skills/${name}/: rename one of them`);
     mkdirSync(join(plugin, 'skills', name), { recursive: true });
     writeFileSync(join(plugin, 'skills', name, 'SKILL.md'), commandSkill(join(repoRoot, 'commands', file), name));
   }
